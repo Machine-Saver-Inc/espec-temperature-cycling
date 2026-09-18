@@ -213,3 +213,55 @@ def test_tuning_thresholds_are_configurable(results_dir):
     # The default clamp would have pinned these to -25 and 85.
     assert recorder.min_c == pytest.approx(-30.0, abs=0.5)
     assert recorder.max_c == pytest.approx(100.0, abs=0.5)
+
+
+def test_guaranteed_soak_cannot_stretch_a_run_for_ever(results_dir):
+    """A chamber that never reaches target must fail the run, not extend it endlessly.
+
+    This is the failure Leo's cable-entry heat loss produces: ask for -20 in a
+    chamber that can only manage -14 and, before this cap, the dwell timer never
+    started and the run had no end.
+    """
+    from espec_burnin.core.run_controller import RunTuning
+
+    recipe = Recipe(cycles=1, cold_c=-20.0, hot_c=40.0, ramp_down_minutes=10,
+                    ramp_up_minutes=10, cold_dwell_minutes=10, hot_dwell_minutes=10,
+                    guaranteed_soak=True, tolerance_c=1.0)
+    tuning = RunTuning(sample_interval_s=30.0, max_extension_percent=50.0)
+
+    with ChamberSimulator(start_temp_c=25.0, max_ramp_c_per_min=5.0,
+                          max_cool_c_per_min=5.0, floor_c=-14.0) as sim:
+        sim.instant = False
+        driver = WatlowF4(sim.port, ConnectionSettings(
+            slave_address=sim.slave_address, close_port_after_each_call=False))
+        recorder = Recorder(batch="unreachable", operator="t", recipe=recipe,
+                            port=sim.port)
+        clock = FakeClock(30.0)
+
+        def sleep(_seconds):
+            clock.now += clock.step
+            sim.advance(clock.step)
+
+        controller = RunController(driver, recipe, recorder, tuning,
+                                   clock=clock, sleep=sleep)
+        state = controller.run()
+        driver.close()
+
+    assert state is RunState.FAILED
+    # It gave up rather than running for ever, but not before genuinely trying.
+    limit = recipe.total_seconds * tuning.max_extension_percent / 100.0
+    assert controller._soak_offset_s > limit
+    assert controller.elapsed_s < recipe.total_seconds * 3
+
+
+def test_no_cap_means_no_limit(results_dir):
+    """Setting the cap to zero restores the old unbounded behaviour on purpose."""
+    from espec_burnin.core.run_controller import RunController as RC
+    from espec_burnin.core.run_controller import RunTuning
+
+    recipe = Recipe(cycles=1, guaranteed_soak=True)
+    controller = RC.__new__(RC)
+    controller.recipe = recipe
+    controller.tuning = RunTuning(max_extension_percent=0.0)
+    controller._soak_offset_s = recipe.total_seconds * 100
+    assert controller._soak_extension_exceeded() is False

@@ -38,6 +38,10 @@ class RunTuning:
     sample_interval_s: float = 1.0
     setpoint_epsilon_c: float = 0.1   # do not rewrite for trivial changes
     comms_grace_minutes: float = 15.0  # give up on a run after this much silence
+    # Guaranteed soak stretches a run when the chamber is behind. Without a cap,
+    # a chamber that can never reach target stretches it forever and the run
+    # silently never ends.
+    max_extension_percent: float = 50.0
     runaway_delta_c: float = 15.0
     runaway_for_minutes: float = 10.0
     # Hard software clamp. Widening it is behind a confirmation in the UI.
@@ -139,6 +143,14 @@ class RunController:
             measured, comms_ok = self._read()
             self._apply_soak_hold(point, measured, comms_ok, dt)
 
+            if self._soak_extension_exceeded():
+                self._finish(
+                    RunState.FAILED,
+                    "the chamber never reached the hold temperature, so the run "
+                    "was stretching without end",
+                )
+                return self.state
+
             if comms_ok:
                 self._comms_lost_since = None
                 self._last_error = None
@@ -208,6 +220,10 @@ class RunController:
         )
         if out_of_tolerance:
             self._soak_offset_s += dt
+
+    def _soak_extension_exceeded(self) -> bool:
+        limit = self.recipe.total_seconds * self.tuning.max_extension_percent / 100.0
+        return limit > 0 and self._soak_offset_s > limit
 
     def _is_runaway(self, point, measured, now) -> bool:
         if measured is None or not is_dwell(point.phase):

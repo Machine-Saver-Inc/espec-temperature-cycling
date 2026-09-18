@@ -138,6 +138,7 @@ class SettingsPage(QWidget):
         self.sample = spin(t.sample_interval_s, 0.2, 60.0, step=0.5, decimals=1, suffix=" s")
         self.epsilon = spin(t.setpoint_epsilon_c, 0.1, 5.0, step=0.1, decimals=1, suffix=" °C")
         self.grace = spin(t.comms_grace_minutes, 1, 240, decimals=0, suffix=" min")
+        self.max_extension = spin(t.max_extension_percent, 0, 500, decimals=0, suffix=" %")
 
         return _page(
             field_row("Sample interval", self.sample,
@@ -148,6 +149,10 @@ class SettingsPage(QWidget):
             field_row("Give up after silence of", self.grace,
                       "How long the chamber may stay unreachable before the run "
                       "is marked failed. The run keeps retrying throughout."),
+            field_row("Allow the run to stretch by", self.max_extension,
+                      "Guaranteed soak extends a run when the chamber is behind. "
+                      "Past this much extra, the run is failed rather than "
+                      "stretching for ever. Set to 0 for no limit."),
         )
 
     def _safety_tab(self, t: RunTuning) -> QWidget:
@@ -193,6 +198,7 @@ class SettingsPage(QWidget):
             sample_interval_s=self.sample.value(),
             setpoint_epsilon_c=self.epsilon.value(),
             comms_grace_minutes=self.grace.value(),
+            max_extension_percent=self.max_extension.value(),
             runaway_delta_c=self.runaway_delta.value(),
             runaway_for_minutes=self.runaway_for.value(),
             absolute_min_c=self.clamp_min.value(),
@@ -245,6 +251,7 @@ class SettingsPage(QWidget):
         self.sample.setValue(t.sample_interval_s)
         self.epsilon.setValue(t.setpoint_epsilon_c)
         self.grace.setValue(t.comms_grace_minutes)
+        self.max_extension.setValue(t.max_extension_percent)
         self.runaway_delta.setValue(t.runaway_delta_c)
         self.runaway_for.setValue(t.runaway_for_minutes)
         self.clamp_min.setValue(t.absolute_min_c)

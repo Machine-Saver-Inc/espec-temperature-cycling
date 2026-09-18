@@ -107,6 +107,31 @@ fast as it heats, and open cable entry ports widen the gap.
 chamber is within tolerance of target, so a chamber running behind stretches the
 run rather than shortening the time the boards spend at temperature.
 
+## Measuring what the chamber can actually do
+
+Whether the chamber can follow a commanded ramp depends on the load and on how
+much heat leaks through the cable entry ports. **Measure the chamber's speed**
+drives it to each extreme and records how fast it actually moved, in 5 °C bands.
+
+Two things the measurement is careful about:
+
+- **Speed is not constant.** A chamber that pulls down at 2.8 °C/min near +75
+  may manage 0.3 °C/min over the last few degrees to −20, so most of the time is
+  spent at the ends. Rates are recorded per band and integrated, never averaged.
+- **An empty chamber is the best case, not your case.** Set the chamber up the
+  way the real run will be — same boards, same fixtures, same cables through the
+  ports — and say so when you save the profile. Measure it empty too if you want
+  the comparison; they save separately, and recipes are checked against the
+  loaded profile.
+
+The test also records the coldest and hottest the chamber actually reached, so a
+recipe asking for −20 °C in a chamber that only manages −17 is flagged before
+you start rather than discovered at hour 30.
+
+Once a profile exists, the recipe screen warns when a ramp is faster than the
+chamber can follow, and **Use the measured times** fills in ramps that will
+actually work.
+
 ## Settings
 
 Everything the program relies on is editable under **Settings**, so a

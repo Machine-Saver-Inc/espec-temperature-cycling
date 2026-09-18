@@ -19,12 +19,14 @@ from PySide6.QtWidgets import (
 )
 
 from espec_burnin import APP_NAME, __version__
+from espec_burnin.core.capability import CapabilityTest
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.core.recorder import Recorder, results_root
 from espec_burnin.core.run_controller import RunController, RunState
 from espec_burnin.hardware.errors import ChamberError
 from espec_burnin.hardware.f4 import WatlowF4
 from espec_burnin.ui import settings as settings_mod
+from espec_burnin.ui.capability_page import CapabilityPage, CapabilityWorker
 from espec_burnin.ui.keepawake import KeepAwake
 from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_error
 from espec_burnin.ui.run_page import RunPage, RunWorker
@@ -33,7 +35,7 @@ from espec_burnin.update.checker import Release, check_for_update
 
 log = logging.getLogger(__name__)
 
-HOME, CONNECT, RECIPE, RUN, SETTINGS = range(5)
+HOME, CONNECT, RECIPE, RUN, SETTINGS, CAPABILITY = range(6)
 
 
 class UpdateWorker(QThread):
@@ -119,6 +121,7 @@ class MainWindow(QMainWindow):
         self.home.start_requested.connect(self._start_flow)
         self.home.results_requested.connect(self._open_results_folder)
         self.home.settings_requested.connect(self._open_settings)
+        self.home.capability_requested.connect(self._open_capability)
         self.stack.addWidget(self.home)
 
         self.connect_page = ConnectPage(self.connection)
@@ -145,6 +148,14 @@ class MainWindow(QMainWindow):
         self.settings_page.saved.connect(self._on_settings_saved)
         self.settings_page.back.connect(lambda: self.stack.setCurrentIndex(HOME))
         self.stack.addWidget(self.settings_page)
+
+        self.capability_page = CapabilityPage()
+        self.capability_page.back.connect(lambda: self.stack.setCurrentIndex(HOME))
+        self.capability_page.start_requested.connect(self._start_capability)
+        self.capability_page.finished.connect(self._capability_finished)
+        self.capability_page.stop_button.clicked.connect(self._stop_capability)
+        self.stack.addWidget(self.capability_page)
+        self.capability_worker: CapabilityWorker | None = None
 
         QTimer.singleShot(400, self._reconnect_remembered_adapter)
         QTimer.singleShot(1200, self._check_for_updates)
@@ -341,8 +352,79 @@ class MainWindow(QMainWindow):
         self.settings["tuning"] = tuning.to_dict()
         settings_mod.save(self.settings)
         self.connect_page.settings = connection
+        self.recipe_page.reload_profiles()
         self.stack.setCurrentIndex(HOME)
         self._reconnect_remembered_adapter()
+
+    # -- chamber capability --------------------------------------------------
+    def _open_capability(self) -> None:
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.information(
+                self, "A run is in progress",
+                "The chamber is busy with a burn-in. Wait until it finishes.",
+            )
+            return
+        if self.port is None:
+            self.stack.setCurrentIndex(CONNECT)
+            return
+        self.capability_page.reset()
+        self.stack.setCurrentIndex(CAPABILITY)
+
+    def _start_capability(self, settings, name, loaded, notes) -> None:
+        if self.port is None:
+            self.stack.setCurrentIndex(CONNECT)
+            return
+        if QMessageBox.question(
+            self, "Start the measurement?",
+            f"The chamber will be driven to {settings.cold_target_c:g} \u00b0C and then "
+            f"{settings.hot_target_c:g} \u00b0C, and left to settle at each end.\n\n"
+            "This takes a few hours and this computer must stay on throughout.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Yes,
+        ) != QMessageBox.Yes:
+            return
+
+        try:
+            self.capability_driver = WatlowF4(self.port.device, self.connection)
+        except ChamberError as exc:
+            QMessageBox.critical(self, "Could not start", describe_error(exc))
+            self.stack.setCurrentIndex(CONNECT)
+            return
+
+        test = CapabilityTest(
+            self.capability_driver, name, settings, loaded=loaded, load_notes=notes
+        )
+        self.capability_worker = CapabilityWorker(test)
+        self.capability_worker.progress.connect(
+            self.capability_page.show_progress, Qt.QueuedConnection
+        )
+        self.capability_worker.done.connect(
+            self._capability_measured, Qt.QueuedConnection
+        )
+        self.keep_awake.start()
+        self.capability_worker.start()
+
+    def _stop_capability(self) -> None:
+        if self.capability_worker is None:
+            return
+        if QMessageBox.question(
+            self, "Stop the measurement?",
+            "The profile will be incomplete, and the chamber will be returned to "
+            "room temperature.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+        ) == QMessageBox.Yes:
+            self.capability_worker.stop()
+
+    def _capability_measured(self, profile) -> None:
+        self.keep_awake.stop()
+        if getattr(self, "capability_driver", None) is not None:
+            self.capability_driver.close()
+            self.capability_driver = None
+        self.capability_worker = None
+        self.capability_page.show_result(profile)
+
+    def _capability_finished(self, profile) -> None:
+        self.recipe_page.reload_profiles()
+        self.stack.setCurrentIndex(HOME)
 
     def _open_results_folder(self) -> None:
         folder = results_root()

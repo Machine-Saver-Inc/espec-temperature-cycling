@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from espec_burnin.core.capability import ChamberProfile, load_profiles
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.hardware import ports as ports_mod
 from espec_burnin.hardware.errors import ChamberError
@@ -70,6 +71,7 @@ class HomePage(QWidget):
     start_requested = Signal()
     results_requested = Signal()
     settings_requested = Signal()
+    capability_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -90,6 +92,10 @@ class HomePage(QWidget):
         results = QPushButton("Open past results")
         results.clicked.connect(self.results_requested)
         layout.addWidget(results, alignment=Qt.AlignLeft)
+
+        capability = QPushButton("Measure the chamber's speed")
+        capability.clicked.connect(self.capability_requested)
+        layout.addWidget(capability, alignment=Qt.AlignLeft)
 
         settings = QPushButton("Settings")
         settings.clicked.connect(self.settings_requested)
@@ -291,6 +297,7 @@ class RecipePage(QWidget):
 
     def __init__(self, recipe: Recipe, operator: str = "") -> None:
         super().__init__()
+        self._profile: ChamberProfile | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(48, 32, 48, 28)
         layout.setSpacing(10)
@@ -298,6 +305,21 @@ class RecipePage(QWidget):
 
         self.summary = subtitle("")
         layout.addWidget(self.summary)
+
+        # What the chamber has actually been measured doing, if anyone has run
+        # the capability test. A ramp the chamber cannot follow becomes a step
+        # change and the recorded profile stops meaning anything.
+        self.capability_note = QLabel("")
+        self.capability_note.setWordWrap(True)
+        self.capability_note.setTextFormat(Qt.RichText)
+        self.capability_note.setObjectName("StatusWarn")
+        self.capability_note.hide()
+        layout.addWidget(self.capability_note)
+
+        self.use_measured = QPushButton("Use the measured times")
+        self.use_measured.clicked.connect(self._apply_measured)
+        self.use_measured.hide()
+        layout.addWidget(self.use_measured, alignment=Qt.AlignLeft)
 
         form = QWidget()
         f = QVBoxLayout(form)
@@ -409,7 +431,72 @@ class RecipePage(QWidget):
         buttons.addWidget(back)
         layout.addLayout(buttons)
 
+        self.reload_profiles()
         self._update_summary()
+
+    def reload_profiles(self) -> None:
+        """Prefer a loaded profile: the empty chamber is the best case, not
+        the case the boards will actually see."""
+        profiles = load_profiles()
+        loaded = [p for p in profiles if p.loaded]
+        self._profile = (loaded or profiles or [None])[0]
+        self._update_summary()
+
+    def _apply_measured(self) -> None:
+        if self._profile is None:
+            return
+        down = self._profile.recommended_minutes(self.hot.value(), self.cold.value())
+        up = self._profile.recommended_minutes(self.cold.value(), self.hot.value())
+        if down:
+            self.ramp_down.setValue(down)
+        if up:
+            self.ramp_up.setValue(up)
+
+    def _check_against_profile(self, recipe: Recipe) -> None:
+        profile = self._profile
+        if profile is None:
+            self.capability_note.hide()
+            self.use_measured.hide()
+            return
+
+        problems: list[str] = []
+        if not profile.can_reach(recipe.cold_c):
+            problems.append(
+                f"the coldest it reached was {profile.reachable_min_c:.1f} \u00b0C, "
+                f"so {recipe.cold_c:g} \u00b0C is below what it managed"
+            )
+        if not profile.can_reach(recipe.hot_c):
+            problems.append(
+                f"the hottest it reached was {profile.reachable_max_c:.1f} \u00b0C, "
+                f"so {recipe.hot_c:g} \u00b0C is above what it managed"
+            )
+
+        needs_down = profile.minutes_to_traverse(recipe.hot_c, recipe.cold_c)
+        needs_up = profile.minutes_to_traverse(recipe.cold_c, recipe.hot_c)
+        if needs_down and recipe.ramp_down_minutes < needs_down:
+            problems.append(
+                f"cooling needs about {needs_down:.0f} min, not "
+                f"{recipe.ramp_down_minutes:.0f}"
+            )
+        if needs_up and recipe.ramp_up_minutes < needs_up:
+            problems.append(
+                f"heating needs about {needs_up:.0f} min, not "
+                f"{recipe.ramp_up_minutes:.0f}"
+            )
+
+        if not problems:
+            self.capability_note.hide()
+            self.use_measured.hide()
+            return
+
+        self.capability_note.setText(
+            f"<b>Measured against \u201c{profile.name}\u201d:</b> "
+            + "; ".join(problems)
+            + ". A ramp the chamber cannot follow becomes a step change, and the "
+            "recorded profile stops meaning anything."
+        )
+        self.capability_note.show()
+        self.use_measured.setVisible(bool(needs_down or needs_up))
 
     def _mode_changed(self) -> None:
         by_cycles = self.by_cycles.isChecked()
@@ -453,6 +540,8 @@ class RecipePage(QWidget):
             self.cycles.blockSignals(True)
             self.cycles.setValue(recipe.cycles)
             self.cycles.blockSignals(False)
+
+        self._check_against_profile(recipe)
 
         finish = datetime.now() + timedelta(seconds=recipe.total_seconds)
         self.summary.setText(

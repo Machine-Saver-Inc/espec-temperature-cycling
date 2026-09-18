@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0]
+
+### Added
+- **Chamber capability test.** Drives the chamber to each extreme and records
+  how fast it actually moved, in 5 °C bands, in both directions, along with the
+  coldest and hottest it reached. Saved as a named profile that records how the
+  chamber was loaded, since an empty chamber with closed ports is the best case
+  rather than the operating case.
+- The recipe screen checks the recipe against the measured profile and warns
+  when a ramp is faster than the chamber can follow or a setpoint is beyond what
+  it reached, with a button to fill in the measured times.
+
+### Fixed
+- Guaranteed soak could stretch a run without end: a chamber that never reached
+  the hold temperature never started the dwell timer, so the run had no finish.
+  There is now a maximum extension (50% by default, configurable, 0 to disable)
+  after which the run is failed with the reason recorded.
+
+
 ## [0.2.0]
 
 ### Added

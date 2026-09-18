@@ -92,6 +92,24 @@ a dwell. Usually one of:
   on the recipe screen; a ramp the chamber cannot hold becomes a step change and
   the recorded profile stops meaning anything.
 
+## The run failed saying the chamber never reached the hold temperature
+
+Guaranteed soak holds the profile until the chamber is actually within tolerance
+of target. If the chamber cannot get there — usually heat leaking through the
+cable entry ports, an overloaded chamber, or a door not sealing — the run would
+stretch for ever, so it is failed once it has stretched past the limit under
+**Settings → Run behaviour** (50% by default).
+
+What to do:
+
+1. Run **Measure the chamber's speed** from the home screen, set up the way the
+   real run will be. It reports the coldest and hottest the chamber actually
+   reaches.
+2. Set the recipe's setpoints inside that range, or reduce what is in the
+   chamber, or seal the cable entry ports better.
+3. If you would rather accept a shorter hold than a longer run, turn guaranteed
+   soak off on the recipe screen.
+
 ## The run stopped because the computer slept
 
 The program inhibits sleep while a run is active, but a forced sleep, a lid
