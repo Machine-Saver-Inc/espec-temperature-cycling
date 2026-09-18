@@ -85,6 +85,29 @@ Results land in `Documents/Espec Burn-In/<batch> <date>/`:
 | `run.json` | the recipe and live position — this is what makes a crashed run resumable |
 | `report.html` | a self-contained report with the chart and the verdict |
 
+## Updates
+
+The program checks for a new release each time it opens, and once a day while
+it sits idle. If there is one, a banner appears along the top naming the
+version, with **What's new**, **Update now** and **Later**.
+
+**Update now** does the whole thing: it downloads the file for your platform,
+checks it against the `SHA256SUMS` published with the release, and installs it.
+On Windows the installer runs silently and the program reopens on the new
+version. On Linux an AppImage replaces itself and restarts. A `.deb` cannot be
+installed without root, so the program shows you the one `apt` command instead.
+
+**A download that does not match its published checksum is not installed.** If
+the checksum list cannot be fetched at all, the update is refused rather than
+trusted — you are offered the release page instead.
+
+**Updates are never offered during a run.** If one appears mid burn-in, the
+banner is hidden until the run finishes.
+
+If the chamber PC has no internet it will never hear about a release. The home
+screen shows the installed version and when it last managed to check, and
+`espec-burn-in --version` prints it from a command line.
+
 ## The cycle
 
 Nothing is fixed at 48 hours. The default preset is 12 cycles of 4 hours, which

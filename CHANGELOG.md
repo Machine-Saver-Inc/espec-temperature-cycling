@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0]
+
+### Added
+- **Update now actually updates.** It downloads the file for the platform,
+  verifies it against the release's `SHA256SUMS`, and installs it: the Windows
+  installer runs silently and the program reopens, an AppImage replaces itself
+  and restarts, and a `.deb` shows the one apt command since the program will
+  not ask for root. Previously the button only opened the release page.
+- A download whose checksum does not match, or whose checksum list cannot be
+  fetched, is refused rather than installed, and nothing is changed.
+- The home screen shows the installed version and when the program last managed
+  to check for updates, with a **Check for updates** button. A chamber PC with
+  no internet is never told about a release, so the version needs to be
+  readable without one.
+- `espec-burn-in --version` prints the version from a command line.
+
+
 ## [0.3.0]
 
 ### Added

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import webbrowser
+from datetime import datetime
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -32,6 +34,14 @@ from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_er
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
 from espec_burnin.update.checker import Release, check_for_update
+from espec_burnin.update.installer import (
+    Applied,
+    UpdateError,
+    apply_update,
+    download_asset,
+    relaunch,
+    verify_download,
+)
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +57,43 @@ class UpdateWorker(QThread):
             self.available.emit(release)
 
 
+class DownloadWorker(QThread):
+    """Fetch and verify an update off the GUI thread."""
+
+    progress = Signal(int, int)
+    ready = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, release: Release) -> None:
+        super().__init__()
+        self.release = release
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        def report(done: int, total: int) -> None:
+            if self._cancelled:
+                raise UpdateError("cancelled")
+            self.progress.emit(done, total)
+
+        try:
+            path = download_asset(self.release, progress=report)
+            verify_download(path, self.release)
+        except UpdateError as exc:
+            if not self._cancelled:
+                self.failed.emit(str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 - surfaced to the user
+            self.failed.emit(str(exc))
+            return
+        self.ready.emit(path)
+
+
 class UpdateBanner(QFrame):
+    update_requested = Signal(object)
+
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("Banner")
@@ -86,7 +132,7 @@ class UpdateBanner(QFrame):
 
     def _open_release(self) -> None:
         if self._release:
-            webbrowser.open(self._release.html_url)
+            self.update_requested.emit(self._release)
 
 
 class MainWindow(QMainWindow):
@@ -111,6 +157,7 @@ class MainWindow(QMainWindow):
         outer.setSpacing(0)
 
         self.banner = UpdateBanner()
+        self.banner.update_requested.connect(self._download_update)
         outer.addWidget(self.banner)
 
         self.stack = QStackedWidget()
@@ -122,6 +169,8 @@ class MainWindow(QMainWindow):
         self.home.results_requested.connect(self._open_results_folder)
         self.home.settings_requested.connect(self._open_settings)
         self.home.capability_requested.connect(self._open_capability)
+        self.home.check_now_requested.connect(self._check_now)
+        self.home.set_version_line(__version__, self.settings.get("last_update_check"))
         self.stack.addWidget(self.home)
 
         self.connect_page = ConnectPage(self.connection)
@@ -329,12 +378,110 @@ class MainWindow(QMainWindow):
             return
         self._update_worker = UpdateWorker()
         self._update_worker.available.connect(self._on_update_available)
+        self._update_worker.finished.connect(self._record_check)
         self._update_worker.start()
 
     def _on_update_available(self, release: Release) -> None:
         self._pending_release = release
         if self.worker is None:      # never interrupt a run
             self.banner.offer(release)
+
+    def _record_check(self) -> None:
+        stamp = datetime.now().strftime("%d %b %Y %H:%M")
+        self.settings["last_update_check"] = stamp
+        settings_mod.save(self.settings)
+        self.home.set_version_line(__version__, stamp)
+
+    def _check_now(self) -> None:
+        """Manual check, for anyone who wants to ask rather than wait."""
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.information(
+                self, "A run is in progress",
+                "Updates are not offered while a burn-in is running.",
+            )
+            return
+        self._manual_check = UpdateWorker()
+        self._manual_check.available.connect(self._on_update_available)
+        self._manual_check.finished.connect(self._manual_check_finished)
+        self._manual_check.start()
+
+    def _manual_check_finished(self) -> None:
+        self._record_check()
+        if self._pending_release is None:
+            QMessageBox.information(
+                self, "Up to date",
+                f"Version {__version__} is the newest release.",
+            )
+
+    # -- doing the update ----------------------------------------------------
+    def _download_update(self, release: Release) -> None:
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.information(
+                self, "A run is in progress",
+                "The update will be offered again when the burn-in finishes.",
+            )
+            return
+
+        self._progress = QProgressDialog(
+            f"Downloading version {release.version}\u2026", "Cancel", 0, 100, self
+        )
+        self._progress.setWindowTitle("Updating")
+        self._progress.setWindowModality(Qt.WindowModal)
+        self._progress.setMinimumDuration(0)
+        self._progress.setAutoClose(False)
+
+        self._download = DownloadWorker(release)
+        self._download.progress.connect(self._on_download_progress, Qt.QueuedConnection)
+        self._download.ready.connect(self._on_download_ready, Qt.QueuedConnection)
+        self._download.failed.connect(self._on_download_failed, Qt.QueuedConnection)
+        self._progress.canceled.connect(self._download.cancel)
+        self._download.start()
+
+    def _on_download_progress(self, done: int, total: int) -> None:
+        if total:
+            self._progress.setMaximum(100)
+            self._progress.setValue(int(done * 100 / total))
+            self._progress.setLabelText(
+                f"Downloading\u2026 {done / 1048576:.0f} of {total / 1048576:.0f} MB"
+            )
+        else:
+            self._progress.setMaximum(0)
+
+    def _on_download_failed(self, message: str) -> None:
+        self._progress.close()
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("The update was not installed")
+        box.setText(message)
+        box.setInformativeText(
+            "Nothing has been changed. You can download it by hand from the "
+            "release page instead."
+        )
+        open_page = box.addButton("Open the release page", QMessageBox.ActionRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_page and self._pending_release:
+            webbrowser.open(self._pending_release.html_url)
+
+    def _on_download_ready(self, path) -> None:
+        self._progress.setLabelText("Verified. Installing\u2026")
+        self._progress.setValue(100)
+        try:
+            result = apply_update(path)
+        except UpdateError as exc:
+            self._on_download_failed(str(exc))
+            return
+        self._progress.close()
+
+        if result.outcome is Applied.MANUAL:
+            QMessageBox.information(self, "Downloaded", result.message)
+            return
+
+        QMessageBox.information(self, "Updating", result.message)
+        if result.outcome is Applied.RESTARTING:
+            relaunch(result.path)
+        self._updating = True
+        self.close()
 
     def _open_settings(self) -> None:
         if self.worker is not None and self.worker.isRunning():
@@ -432,6 +579,10 @@ class MainWindow(QMainWindow):
         webbrowser.open(folder.as_uri())
 
     def closeEvent(self, event) -> None:
+        if getattr(self, "_updating", False):
+            self.keep_awake.stop()
+            event.accept()
+            return
         if self.worker is not None and self.worker.isRunning():
             answer = QMessageBox.question(
                 self,

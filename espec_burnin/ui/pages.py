@@ -72,6 +72,7 @@ class HomePage(QWidget):
     results_requested = Signal()
     settings_requested = Signal()
     capability_requested = Signal()
+    check_now_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -106,6 +107,27 @@ class HomePage(QWidget):
         self.status.setObjectName("StatusGood")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+
+        # The installed version, readable without digging into the title bar --
+        # a chamber PC with no internet will never be told about an update, so
+        # somebody has to be able to read this out over the phone.
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 8, 0, 0)
+        self.version_label = QLabel("")
+        self.version_label.setObjectName("Hint")
+        footer.addWidget(self.version_label)
+        footer.addSpacing(10)
+        self.check_now = QPushButton("Check for updates")
+        self.check_now.setFlat(True)
+        self.check_now.clicked.connect(self.check_now_requested)
+        footer.addWidget(self.check_now)
+        footer.addStretch(1)
+        layout.addLayout(footer)
+
+    def set_version_line(self, version: str, last_checked: str | None) -> None:
+        when = f" \u00b7 last checked {last_checked}" if last_checked else \
+               " \u00b7 not checked yet"
+        self.version_label.setText(f"Version {version}{when}")
 
     def set_connection(self, text: str, ok: bool) -> None:
         self.status.setText(text)

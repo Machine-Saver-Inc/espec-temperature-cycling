@@ -14,6 +14,14 @@ def _log_path() -> Path:
 
 
 def main() -> int:
+    # Answerable from a command line, which matters when someone is on the
+    # phone with a chamber PC that has never seen the internet.
+    if any(arg in ("--version", "-V") for arg in sys.argv[1:]):
+        from espec_burnin import APP_NAME, __version__
+
+        print(f"{APP_NAME} {__version__}")
+        return 0
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

@@ -120,3 +120,30 @@ wall-clock time.
 ## Log file
 
 `~/.espec-burn-in/espec-burn-in.log` on both platforms.
+
+## The update would not install
+
+The program refuses to install anything it cannot verify. Two cases:
+
+- **"does not match the checksum published with the release"** — the download
+  was corrupted or interfered with. Nothing was changed. Try again; if it keeps
+  happening, download it from the release page by hand and check it yourself
+  with `sha256sum -c SHA256SUMS --ignore-missing`.
+- **"could not fetch the checksum list"** — usually a proxy or a dropped
+  connection. Nothing was changed. Try again later, or install by hand.
+
+On Linux, replacing an AppImage needs write permission where it lives. If it
+was installed somewhere system-wide, move it into your home directory or update
+it by hand.
+
+A `.deb` install cannot be done by the program, because it will not ask for
+root on your behalf. It downloads the file and shows you the command.
+
+## It never tells me about updates
+
+The check is silent when it fails, so that a missing network never delays
+startup. The home screen shows when it last succeeded — if that is blank or old,
+the machine probably cannot reach github.com. Press **Check for updates** to try
+while you watch.
+
+Updates are also never offered while a burn-in is running.
