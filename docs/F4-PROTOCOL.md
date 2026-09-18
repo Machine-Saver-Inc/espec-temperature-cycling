@@ -24,7 +24,7 @@ between a logged hiccup and a failed test.
 | Register | Meaning | Function code |
 | --- | --- | --- |
 | `100` | Process value — chamber air temperature, tenths °C | 3 |
-| `300` | Setpoint, tenths °C | 16 (some F4s want 6) |
+| `300` | Setpoint, tenths °C | **16** — confirmed on this chamber |
 
 **Do not re-derive these numbers from the Watlow F4 manual.** The manual numbers
 registers from 1 while minimalmodbus sends zero-based addresses, so the manual
@@ -87,9 +87,23 @@ holds its last setpoint. Hence the sleep inhibitor, the resume-on-launch
 prompt, and the rule that every run ends by commanding the chamber back to
 25 °C.
 
+## Function code for the setpoint write: 16
+
+Confirmed. The notebook that drove the real chamber called
+
+```python
+oven.write_register(oven_set, convert_oven(-65))
+```
+
+with no `functioncode` argument, so minimalmodbus used its default of **16**,
+and that write worked. There is no need to try function code 6 on this
+chamber.
+
+Function code 6 remains selectable under *Settings → Connection* for a
+different controller that refuses 16, and both paths are covered by tests, but
+16 is the right default and is what ships.
+
 ## Still to confirm on the bench
 
-- Whether this F4 accepts function code 16 for the setpoint write, or needs 6.
-  `WatlowF4(..., write_functioncode=6)` switches it; both are tested.
 - The exact key sequence to clear a fault on this chamber, for step 2 of the
   troubleshooting panel.

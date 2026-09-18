@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The setpoint write function code is documented as confirmed rather than
+  assumed. The notebook that drove the real chamber passed no `functioncode`,
+  so minimalmodbus used its default of 16 and that write worked; 16 is what the
+  program has always sent. Function code 6 stays selectable for a different
+  controller.
+
+
 ## [0.5.0]
 
 ### Added

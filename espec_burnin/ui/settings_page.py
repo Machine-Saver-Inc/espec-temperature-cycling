@@ -124,8 +124,8 @@ class SettingsPage(QWidget):
                       "reply looks like a dead chamber."),
             field_row("Retries per message", self.retries),
             field_row("Setpoint write function", self.write_fc,
-                      "16 works on most F4s. Switch to 6 if setpoint writes are "
-                      "refused."),
+                      "16 is confirmed working on our chamber. Only change this "
+                      "for a different controller that refuses it."),
             field_row("Port handling", self.close_after,
                       "Needed on Windows. Can usually be turned off on Linux."),
             field_row("Lowest believable reading", self.plaus_min,

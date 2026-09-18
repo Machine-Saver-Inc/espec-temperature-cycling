@@ -54,7 +54,7 @@ class ConnectionSettings:
     stopbits: int = 1
     timeout_s: float = 0.35       # the notebook used 0.10, too tight to be safe
     retries: int = 3
-    write_functioncode: int = 16  # some F4s want 6
+    write_functioncode: int = 16  # confirmed on our chamber; 6 is the fallback
     close_port_after_each_call: bool = True
     plausible_min_c: float = -80.0
     plausible_max_c: float = 200.0
