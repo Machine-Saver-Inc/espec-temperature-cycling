@@ -16,6 +16,33 @@
    `dialout` group with `sudo usermod -aG dialout $USER`, then log out and back
    in.
 
+## The COM port is being used by another program
+
+The program now says this explicitly rather than telling you to check the port,
+and on Linux it names the process holding it.
+
+Only one program can hold a serial port at a time. Usual culprits:
+
+1. Chamber or instrument software supplied with the Espec.
+2. A terminal program — PuTTY, Tera Term, RealTerm, the Arduino Serial Monitor.
+3. A second copy of this program. Only one can use the chamber.
+4. A previous run that did not exit cleanly.
+
+If you cannot find it, unplugging the USB adapter and plugging it back in
+releases the port.
+
+On Linux you can identify the holder yourself:
+
+```sh
+fuser -v /dev/ttyUSB0      # or: lsof /dev/ttyUSB0
+```
+
+## That COM port is no longer there
+
+The adapter has been unplugged, or its driver has dropped it. Check it is still
+plugged in, then use **Find it for me** — if it was replugged, the port name may
+have changed.
+
 ## Not getting a temperature from the chamber
 
 These are the steps the program shows on screen, cheapest and most likely first.

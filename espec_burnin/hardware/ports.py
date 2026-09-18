@@ -8,7 +8,8 @@ from dataclasses import dataclass
 
 from serial.tools import list_ports
 
-from espec_burnin.hardware.f4 import SLAVE_ADDRESS, ChamberError, WatlowF4
+from espec_burnin.hardware.errors import ChamberError, PortBusyError
+from espec_burnin.hardware.f4 import ConnectionSettings, WatlowF4
 
 log = logging.getLogger(__name__)
 
@@ -80,29 +81,51 @@ def find_port_by_serial_number(serial_number: str) -> PortInfo | None:
     return None
 
 
-def probe_port(device: str, slave_address: int = SLAVE_ADDRESS) -> float | None:
-    """Return the temperature if a chamber answers on this port, else None."""
+def probe_port(
+    device: str, settings: ConnectionSettings | None = None
+) -> tuple[float | None, ChamberError | None]:
+    """Try to read a temperature from this port.
+
+    Returns ``(temperature, None)`` on success, or ``(None, error)`` where the
+    error says *why* -- busy, missing, not permitted, or simply silent. The
+    caller needs the distinction: "the port is held by another program" and
+    "the chamber is switched off" look identical otherwise.
+    """
     driver = None
     try:
-        driver = WatlowF4(device, slave_address, timeout=0.3)
-        return driver.read_temperature(retries=2)
-    except (ChamberError, OSError, Exception) as exc:  # noqa: BLE001 - probing
+        driver = WatlowF4(device, settings or ConnectionSettings())
+        return driver.read_temperature(retries=2), None
+    except ChamberError as exc:
         log.debug("no chamber on %s: %s", device, exc)
-        return None
+        return None, exc
+    except Exception as exc:  # noqa: BLE001 - probing must never raise
+        log.debug("unexpected probe failure on %s: %s", device, exc)
+        return None, ChamberError(str(exc), port=device)
     finally:
         if driver is not None:
             driver.close()
 
 
-def autodetect(slave_address: int = SLAVE_ADDRESS) -> tuple[PortInfo, float] | None:
-    """Walk candidate ports and return the first that answers plausibly."""
+def autodetect(
+    settings: ConnectionSettings | None = None,
+) -> tuple[PortInfo | None, float | None, ChamberError | None]:
+    """Walk candidate ports and return the first that answers plausibly.
+
+    If none answer, returns the most informative failure seen: a port held by
+    another program is worth reporting over a port that was merely silent.
+    """
+    best_error: ChamberError | None = None
     for port in list_serial_ports():
         if port.is_probably_bluetooth:
             continue
-        temperature = probe_port(port.device, slave_address)
+        temperature, error = probe_port(port.device, settings)
         if temperature is not None:
-            return port, temperature
-    return None
+            return port, temperature, None
+        if error is not None and (
+            best_error is None or isinstance(error, PortBusyError)
+        ):
+            best_error = error
+    return None, None, best_error
 
 
 def linux_dialout_hint() -> str | None:

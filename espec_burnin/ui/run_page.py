@@ -24,44 +24,7 @@ except ImportError:  # pragma: no cover - plotting is optional at import time
 
 from espec_burnin.core.profile import format_duration
 from espec_burnin.core.run_controller import RunController, RunState, Status
-
-TROUBLESHOOTING_STEPS = [
-    (
-        "Is the chamber switched on?",
-        "The Watlow F4 display on the front of the chamber should be lit and showing a "
-        "temperature. If it is dark, turn the chamber's main power on and give the "
-        "controller about ten seconds to start.",
-    ),
-    (
-        "Is a fault showing?",
-        "If the F4 display is flashing an alarm or error, clear it at the controller "
-        "before going further. If the chamber's separate over-temperature limit "
-        "controller has tripped, it has to be reset on that limit controller — the F4 "
-        "cannot clear it, and the chamber will not heat or cool until it is.",
-    ),
-    (
-        "Check the cable.",
-        "The serial cable should be firmly seated at both ends: the communications port "
-        "on the chamber, and the USB adapter on this computer.",
-    ),
-    (
-        "Check the port.",
-        "Confirm the port below still exists — Device Manager under Ports (COM & LPT) "
-        "on Windows, ls /dev/ttyUSB* on Linux. If the adapter has been unplugged and "
-        "replugged the name may have changed; Change port will re-detect it.",
-    ),
-    (
-        "Is anything else using the port?",
-        "Chamber vendor software, a terminal program such as PuTTY or Tera Term, or a "
-        "second copy of this program will hold the port open and lock this one out. "
-        "Close them.",
-    ),
-    (
-        "Check the controller's communication settings.",
-        "They should read address 201, 19200 baud, 8 data bits, no parity, 1 stop bit. "
-        "A controller that has been factory reset will be back at its defaults.",
-    ),
-]
+from espec_burnin.hardware.errors import ChamberError, NoReplyError
 
 
 class RunWorker(QThread):
@@ -83,6 +46,13 @@ class RunWorker(QThread):
 
 
 class TroubleshootingPanel(QFrame):
+    """What to do about the failure that actually happened.
+
+    "The port is held by another program" and "the chamber is switched off"
+    need different answers, so the steps come from the error rather than from a
+    single fixed list.
+    """
+
     retry = Signal()
     change_port = Signal()
     stop_run = Signal()
@@ -90,44 +60,39 @@ class TroubleshootingPanel(QFrame):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("Card")
+        self._port = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(10)
 
-        heading = QLabel("Not getting a temperature from the chamber")
-        heading.setObjectName("StatusBad")
-        heading.setStyleSheet("font-size: 18px;")
-        layout.addWidget(heading)
+        self.heading = QLabel("")
+        self.heading.setObjectName("StatusBad")
+        self.heading.setStyleSheet("font-size: 18px;")
+        self.heading.setWordWrap(True)
+        layout.addWidget(self.heading)
 
-        note = QLabel(
-            "The run has not been abandoned — the program is still trying, and this "
-            "panel will close as soon as a reading comes back."
+        self.note = QLabel(
+            "The run has not been abandoned \u2014 the program is still trying, and "
+            "this panel will close as soon as a reading comes back."
         )
-        note.setWordWrap(True)
-        note.setObjectName("Subtitle")
-        layout.addWidget(note)
+        self.note.setWordWrap(True)
+        self.note.setObjectName("Subtitle")
+        layout.addWidget(self.note)
 
-        # The steps go in a scroll area: word-wrapped detail text needs more
-        # vertical room than the window can guarantee, and a clipped
-        # troubleshooting step is worse than no troubleshooting step at all.
-        steps = QWidget()
-        steps_layout = QVBoxLayout(steps)
-        steps_layout.setContentsMargins(0, 0, 8, 0)
-        steps_layout.setSpacing(10)
-        for index, (step, detail) in enumerate(TROUBLESHOOTING_STEPS, start=1):
-            block = QLabel(f"<b>{index}. {step}</b><br>{detail}")
-            block.setWordWrap(True)
-            block.setTextFormat(Qt.RichText)
-            block.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-            steps_layout.addWidget(block)
-        steps_layout.addStretch(1)
+        # Word-wrapped step text needs more vertical room than the window can
+        # guarantee, and a clipped troubleshooting step is worse than none.
+        self._steps_holder = QWidget()
+        self._steps_layout = QVBoxLayout(self._steps_holder)
+        self._steps_layout.setContentsMargins(0, 0, 8, 0)
+        self._steps_layout.setSpacing(10)
 
         scroll = QScrollArea()
-        scroll.setWidget(steps)
+        scroll.setWidget(self._steps_holder)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setMinimumHeight(300)
+        scroll.setMinimumHeight(120)
+        self._scroll = scroll
         layout.addWidget(scroll, 1)
 
         self.port_label = QLabel("")
@@ -151,8 +116,50 @@ class TroubleshootingPanel(QFrame):
         buttons.addWidget(stop)
         layout.addLayout(buttons)
 
+        self.show_error(None)
+
     def set_port(self, port: str) -> None:
+        self._port = port
         self.port_label.setText(f"Using {port}")
+
+    def show_error(self, error: ChamberError | None) -> None:
+        error = error or NoReplyError()
+        if self.heading.text() == error.headline:
+            return          # same failure, leave the panel alone
+
+        self.heading.setText(error.headline)
+
+        while self._steps_layout.count():
+            item = self._steps_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                # setParent(None) detaches it now; deleteLater alone defers to
+                # the event loop and the old steps stay painted underneath.
+                widget.setParent(None)
+                widget.deleteLater()
+
+        holders = getattr(error, "holders", ())
+        if holders:
+            found = QLabel(
+                "The port is currently held by: <b>" + ", ".join(holders) + "</b>"
+            )
+            found.setWordWrap(True)
+            found.setTextFormat(Qt.RichText)
+            self._steps_layout.addWidget(found)
+
+        for index, step in enumerate(error.steps, start=1):
+            block = QLabel(f"<b>{index}.</b> {step}".replace("\n", "<br>"))
+            block.setWordWrap(True)
+            block.setTextFormat(Qt.RichText)
+            block.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+            self._steps_layout.addWidget(block)
+        self._steps_layout.addStretch(1)
+
+        # Size to the steps rather than leaving a large empty box for a short
+        # list, while still scrolling for a long one.
+        self._steps_holder.adjustSize()
+        needed = self._steps_holder.sizeHint().height() + 12
+        self._scroll.setMaximumHeight(max(120, min(needed, 380)))
 
 
 class RunPage(QWidget):
@@ -265,6 +272,8 @@ class RunPage(QWidget):
         )
 
         lost = status.state is RunState.COMMS_LOST
+        if lost:
+            self.panel.show_error(status.error)
         self.panel.setVisible(lost)
         if self.plot is not None:
             self.plot.setVisible(not lost)

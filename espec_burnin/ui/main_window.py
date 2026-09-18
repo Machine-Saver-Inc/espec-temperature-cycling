@@ -22,16 +22,18 @@ from espec_burnin import APP_NAME, __version__
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.core.recorder import Recorder, results_root
 from espec_burnin.core.run_controller import RunController, RunState
+from espec_burnin.hardware.errors import ChamberError
 from espec_burnin.hardware.f4 import WatlowF4
 from espec_burnin.ui import settings as settings_mod
 from espec_burnin.ui.keepawake import KeepAwake
-from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage
+from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_error
 from espec_burnin.ui.run_page import RunPage, RunWorker
+from espec_burnin.ui.settings_page import SettingsPage
 from espec_burnin.update.checker import Release, check_for_update
 
 log = logging.getLogger(__name__)
 
-HOME, CONNECT, RECIPE, RUN = range(4)
+HOME, CONNECT, RECIPE, RUN, SETTINGS = range(5)
 
 
 class UpdateWorker(QThread):
@@ -92,6 +94,8 @@ class MainWindow(QMainWindow):
         self.resize(940, 720)
 
         self.settings = settings_mod.load()
+        self.connection = settings_mod.connection_from(self.settings)
+        self.tuning = settings_mod.tuning_from(self.settings)
         self.port = None
         self.driver: WatlowF4 | None = None
         self.worker: RunWorker | None = None
@@ -114,15 +118,16 @@ class MainWindow(QMainWindow):
         self.home = HomePage()
         self.home.start_requested.connect(self._start_flow)
         self.home.results_requested.connect(self._open_results_folder)
+        self.home.settings_requested.connect(self._open_settings)
         self.stack.addWidget(self.home)
 
-        self.connect_page = ConnectPage()
+        self.connect_page = ConnectPage(self.connection)
         self.connect_page.connected.connect(self._on_connected)
         self.connect_page.back.connect(lambda: self.stack.setCurrentIndex(HOME))
         self.stack.addWidget(self.connect_page)
 
         self.recipe_page = RecipePage(
-            Recipe.from_dict(self.settings.get("recipe", {})),
+            settings_mod.recipe_from(self.settings),
             self.settings.get("operator", ""),
         )
         self.recipe_page.start.connect(self._confirm_and_start)
@@ -135,6 +140,11 @@ class MainWindow(QMainWindow):
             lambda: self.stack.setCurrentIndex(CONNECT)
         )
         self.stack.addWidget(self.run_page)
+
+        self.settings_page = SettingsPage(self.connection, self.tuning)
+        self.settings_page.saved.connect(self._on_settings_saved)
+        self.settings_page.back.connect(lambda: self.stack.setCurrentIndex(HOME))
+        self.stack.addWidget(self.settings_page)
 
         QTimer.singleShot(400, self._reconnect_remembered_adapter)
         QTimer.singleShot(1200, self._check_for_updates)
@@ -199,7 +209,7 @@ class MainWindow(QMainWindow):
 
     def _launch(self, recipe, batch, operator, resume_elapsed=0.0, resume_offset=0.0) -> None:
         try:
-            self.driver = WatlowF4(self.port.device)
+            self.driver = WatlowF4(self.port.device, self.connection)
             self.recorder = Recorder(
                 batch=batch,
                 operator=operator,
@@ -207,14 +217,25 @@ class MainWindow(QMainWindow):
                 port=self.port.device,
                 adapter_serial=self.port.serial_number,
             )
+        except ChamberError as exc:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Critical)
+            box.setWindowTitle("Could not start the run")
+            box.setText(exc.headline)
+            box.setTextFormat(Qt.RichText)
+            box.setInformativeText(describe_error(exc))
+            box.exec()
+            self.stack.setCurrentIndex(CONNECT)
+            return
         except Exception as exc:  # noqa: BLE001 - surfaced to the user
-            QMessageBox.critical(self, "Could not start", str(exc))
+            QMessageBox.critical(self, "Could not start the run", str(exc))
             return
 
         controller = RunController(
             self.driver,
             recipe,
             self.recorder,
+            self.tuning,
             resume_elapsed_s=resume_elapsed,
             resume_offset_s=resume_offset,
         )
@@ -303,6 +324,25 @@ class MainWindow(QMainWindow):
         self._pending_release = release
         if self.worker is None:      # never interrupt a run
             self.banner.offer(release)
+
+    def _open_settings(self) -> None:
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.information(
+                self, "A run is in progress",
+                "Settings cannot be changed while a burn-in is running.",
+            )
+            return
+        self.stack.setCurrentIndex(SETTINGS)
+
+    def _on_settings_saved(self, connection, tuning) -> None:
+        self.connection = connection
+        self.tuning = tuning
+        self.settings["connection"] = connection.to_dict()
+        self.settings["tuning"] = tuning.to_dict()
+        settings_mod.save(self.settings)
+        self.connect_page.settings = connection
+        self.stack.setCurrentIndex(HOME)
+        self._reconnect_remembered_adapter()
 
     def _open_results_folder(self) -> None:
         folder = results_root()

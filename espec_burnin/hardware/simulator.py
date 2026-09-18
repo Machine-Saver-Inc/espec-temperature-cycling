@@ -54,12 +54,18 @@ class ChamberSimulator:
         start_temp_c: float = 23.6,
         *,
         max_ramp_c_per_min: float = 3.0,
+        max_cool_c_per_min: float | None = None,
         time_scale: float = 1.0,
     ) -> None:
         self.slave_address = slave_address
         self.temperature_c = start_temp_c
         self.setpoint_c = start_temp_c
-        self.max_ramp_c_per_min = max_ramp_c_per_min
+        # A real chamber almost never cools as fast as it heats, and open cable
+        # entry ports widen the gap. Model the two separately.
+        self.max_heat_c_per_min = max_ramp_c_per_min
+        self.max_cool_c_per_min = (
+            max_ramp_c_per_min if max_cool_c_per_min is None else max_cool_c_per_min
+        )
         self.time_scale = time_scale
         self.instant = True  # tests that only care about encoding skip the lag
 
@@ -172,6 +178,7 @@ class ChamberSimulator:
     def advance(self, seconds: float) -> None:
         """Move the temperature toward the setpoint at a finite ramp rate."""
         self.instant = False
-        limit = self.max_ramp_c_per_min * (seconds / 60.0)
         error = self.setpoint_c - self.temperature_c
+        rate = self.max_heat_c_per_min if error > 0 else self.max_cool_c_per_min
+        limit = rate * (seconds / 60.0)
         self.temperature_c += max(-limit, min(limit, error))

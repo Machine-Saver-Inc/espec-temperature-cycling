@@ -14,8 +14,8 @@ import pytest
 
 from espec_burnin.core.profile import Phase, Recipe, setpoint_at
 from espec_burnin.core.recorder import Recorder
-from espec_burnin.core.run_controller import RunController, RunState
-from espec_burnin.hardware.f4 import WatlowF4
+from espec_burnin.core.run_controller import RunController, RunState, RunTuning
+from espec_burnin.hardware.f4 import ConnectionSettings, WatlowF4
 from espec_burnin.hardware.simulator import ChamberSimulator
 
 # Every test here drives the pty-backed simulator.
@@ -48,7 +48,8 @@ def results_dir():
 
 
 def build(recipe, results_dir, sim, *, step):
-    driver = WatlowF4(sim.port, sim.slave_address, close_port_after_each_call=False)
+    driver = WatlowF4(sim.port, ConnectionSettings(slave_address=sim.slave_address,
+                                          close_port_after_each_call=False))
     recorder = Recorder(
         batch="MS-4412", operator="test", recipe=recipe, port=sim.port
     )
@@ -57,9 +58,9 @@ def build(recipe, results_dir, sim, *, step):
         driver,
         recipe,
         recorder,
+        RunTuning(sample_interval_s=step),
         clock=clock,
         sleep=clock.sleep,
-        sample_interval_s=step,
     )
     return driver, recorder, controller
 
@@ -88,7 +89,7 @@ def test_full_48_hour_run_completes(results_dir):
 
 
 def test_run_visits_every_phase_and_both_extremes(results_dir):
-    recipe = Recipe(cycles=2, ramp_minutes=30, cold_dwell_minutes=30, hot_dwell_minutes=30,
+    recipe = Recipe(cycles=2, ramp_down_minutes=30, ramp_up_minutes=30, cold_dwell_minutes=30, hot_dwell_minutes=30,
                     guaranteed_soak=False)
     with ChamberSimulator() as sim:
         driver, recorder, controller = build(recipe, results_dir, sim, step=60.0)
@@ -103,7 +104,7 @@ def test_run_visits_every_phase_and_both_extremes(results_dir):
 
 
 def test_chamber_returns_to_ambient_when_the_run_ends(results_dir):
-    recipe = Recipe(cycles=1, ramp_minutes=10, cold_dwell_minutes=10, hot_dwell_minutes=10,
+    recipe = Recipe(cycles=1, ramp_down_minutes=10, ramp_up_minutes=10, cold_dwell_minutes=10, hot_dwell_minutes=10,
                     guaranteed_soak=False)
     with ChamberSimulator() as sim:
         driver, _, controller = build(recipe, results_dir, sim, step=60.0)
@@ -116,7 +117,7 @@ def test_comms_loss_fails_the_run_after_the_grace_period(results_dir):
     recipe = Recipe(cycles=1, guaranteed_soak=False)
     with ChamberSimulator() as sim:
         driver, recorder, controller = build(recipe, results_dir, sim, step=60.0)
-        controller.comms_grace_s = 300
+        controller.tuning.comms_grace_minutes = 5
         sim.stop()  # chamber goes silent
         state = controller.run()
 
@@ -127,11 +128,12 @@ def test_comms_loss_fails_the_run_after_the_grace_period(results_dir):
 
 def test_guaranteed_soak_stretches_the_run_for_a_slow_chamber(results_dir):
     """A chamber that cannot hold temperature must not get a short dwell."""
-    recipe = Recipe(cycles=1, ramp_minutes=10, cold_dwell_minutes=10, hot_dwell_minutes=10,
+    recipe = Recipe(cycles=1, ramp_down_minutes=10, ramp_up_minutes=10, cold_dwell_minutes=10, hot_dwell_minutes=10,
                     guaranteed_soak=True)
     with ChamberSimulator(max_ramp_c_per_min=0.2) as sim:
         sim.instant = False
-        driver = WatlowF4(sim.port, sim.slave_address, close_port_after_each_call=False)
+        driver = WatlowF4(sim.port, ConnectionSettings(slave_address=sim.slave_address,
+                                          close_port_after_each_call=False))
         recorder = Recorder(batch="slow", operator="test", recipe=recipe, port=sim.port)
         clock = FakeClock(30.0)
 
@@ -140,7 +142,8 @@ def test_guaranteed_soak_stretches_the_run_for_a_slow_chamber(results_dir):
             sim.advance(clock.step)
 
         controller = RunController(
-            driver, recipe, recorder, clock=clock, sleep=sleep, sample_interval_s=30.0
+            driver, recipe, recorder, RunTuning(sample_interval_s=30.0),
+            clock=clock, sleep=sleep,
         )
         # Stop well past the nominal length; the point is that it has NOT finished.
         nominal = recipe.total_seconds
@@ -159,3 +162,54 @@ def test_profile_is_a_pure_function_of_elapsed_time():
     for seconds in (0, 3599, 3600, 7200, 14400, 48 * 3600 - 1):
         assert setpoint_at(recipe, seconds) == setpoint_at(recipe, seconds)
     assert setpoint_at(recipe, 48 * 3600).phase is Phase.FINISHED
+
+
+# --- nothing is fixed at 48 hours -------------------------------------------
+
+@pytest.mark.parametrize("hours", [6, 12, 24, 48, 72, 168])
+def test_a_run_can_be_any_length(hours):
+    sized = Recipe().with_duration_hours(hours)
+    assert sized.total_hours == pytest.approx(hours, abs=sized.cycle_seconds / 3600)
+    assert sized.cycles >= 1
+
+
+def test_cooling_and_heating_ramps_are_independent():
+    """A chamber that cools slowly must not be forced to a symmetric profile."""
+    recipe = Recipe(ramp_down_minutes=150, ramp_up_minutes=45)
+    assert recipe.cooling_c_per_min < recipe.heating_c_per_min
+    assert recipe.cycle_seconds == (150 + 45 + 60 + 60) * 60
+
+    # The profile must actually follow the slower cooling ramp.
+    quarter = setpoint_at(recipe, 150 * 60 * 0.5)
+    assert quarter.phase is Phase.RAMP_DOWN
+    assert 0 < quarter.setpoint_c < recipe.start_from_c
+
+
+def test_recipes_saved_before_split_ramps_still_load():
+    old = {"cycles": 4, "ramp_minutes": 30, "cold_dwell_minutes": 20,
+           "hot_dwell_minutes": 20, "cold_c": -10.0, "hot_c": 70.0}
+    recipe = Recipe.from_dict(old)
+    assert recipe.ramp_down_minutes == 30
+    assert recipe.ramp_up_minutes == 30
+    assert recipe.cycles == 4
+
+
+def test_tuning_thresholds_are_configurable(results_dir):
+    from espec_burnin.core.run_controller import RunTuning
+
+    tuning = RunTuning(absolute_min_c=-40, absolute_max_c=120, comms_grace_minutes=3)
+    recipe = Recipe(cycles=1, cold_c=-30, hot_c=100, ramp_down_minutes=10,
+                    ramp_up_minutes=10, cold_dwell_minutes=10, hot_dwell_minutes=10,
+                    guaranteed_soak=False)
+    with ChamberSimulator() as sim:
+        driver = WatlowF4(sim.port, ConnectionSettings(
+            slave_address=sim.slave_address, close_port_after_each_call=False))
+        recorder = Recorder(batch="wide", operator="t", recipe=recipe, port=sim.port)
+        clock = FakeClock(60.0)
+        RunController(driver, recipe, recorder, tuning,
+                      clock=clock, sleep=clock.sleep).run()
+        driver.close()
+
+    # The default clamp would have pinned these to -25 and 85.
+    assert recorder.min_c == pytest.approx(-30.0, abs=0.5)
+    assert recorder.max_c == pytest.approx(100.0, abs=0.5)

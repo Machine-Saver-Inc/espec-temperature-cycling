@@ -6,74 +6,70 @@ from datetime import datetime, timedelta
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QDoubleSpinBox,
+    QButtonGroup,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QSpinBox,
+    QRadioButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.hardware import ports as ports_mod
-
-
-def title(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setObjectName("Title")
-    return label
-
-
-def subtitle(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setObjectName("Subtitle")
-    label.setWordWrap(True)
-    return label
-
-
-def primary(text: str) -> QPushButton:
-    button = QPushButton(text)
-    button.setObjectName("Primary")
-    return button
+from espec_burnin.hardware.errors import ChamberError
+from espec_burnin.hardware.f4 import ConnectionSettings
+from espec_burnin.ui.widgets import (
+    check,
+    field_row,
+    int_spin,
+    primary,
+    spin,
+    subtitle,
+    title,
+)
 
 
 class ProbeWorker(QThread):
     """Port probing off the GUI thread, so a dead port never freezes the window."""
 
     found = Signal(object, float)
-    not_found = Signal()
+    not_found = Signal(object)          # ChamberError or None
 
-    def __init__(self, device: str | None = None) -> None:
+    def __init__(self, settings: ConnectionSettings, device: str | None = None) -> None:
         super().__init__()
         self.device = device
+        self.settings = settings
 
     def run(self) -> None:
         if self.device:
-            temperature = ports_mod.probe_port(self.device)
+            temperature, error = ports_mod.probe_port(self.device, self.settings)
             if temperature is None:
-                self.not_found.emit()
-            else:
-                match = next(
-                    (p for p in ports_mod.list_serial_ports() if p.device == self.device),
-                    None,
-                )
-                self.found.emit(match, temperature)
+                self.not_found.emit(error)
+                return
+            match = next(
+                (p for p in ports_mod.list_serial_ports() if p.device == self.device),
+                None,
+            )
+            self.found.emit(match, temperature)
             return
-        result = ports_mod.autodetect()
-        if result is None:
-            self.not_found.emit()
+
+        port, temperature, error = ports_mod.autodetect(self.settings)
+        if port is None:
+            self.not_found.emit(error)
         else:
-            self.found.emit(result[0], result[1])
+            self.found.emit(port, temperature)
 
 
 class HomePage(QWidget):
     start_requested = Signal()
     results_requested = Signal()
+    settings_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -83,7 +79,7 @@ class HomePage(QWidget):
         layout.addStretch(1)
         layout.addWidget(title("Espec Burn-In"))
         layout.addWidget(
-            subtitle("Temperature cycling for PCB burn-in, −20 °C to +80 °C.")
+            subtitle("Temperature cycling for PCB burn-in.")
         )
         layout.addSpacing(24)
 
@@ -95,9 +91,14 @@ class HomePage(QWidget):
         results.clicked.connect(self.results_requested)
         layout.addWidget(results, alignment=Qt.AlignLeft)
 
+        settings = QPushButton("Settings")
+        settings.clicked.connect(self.settings_requested)
+        layout.addWidget(settings, alignment=Qt.AlignLeft)
+
         layout.addStretch(2)
         self.status = QLabel("")
         self.status.setObjectName("StatusGood")
+        self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
     def set_connection(self, text: str, ok: bool) -> None:
@@ -107,15 +108,16 @@ class HomePage(QWidget):
 
 
 class ConnectPage(QWidget):
-    """Port selection, auto-detect, and the no-ports-found guidance."""
+    """Port selection, auto-detect, and guidance when it does not work."""
 
     connected = Signal(object)
     back = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, settings: ConnectionSettings) -> None:
         super().__init__()
         self._worker: ProbeWorker | None = None
         self._ports: list = []
+        self.settings = settings
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(48, 40, 48, 40)
@@ -138,6 +140,7 @@ class ConnectPage(QWidget):
 
         self.result = QLabel("")
         self.result.setWordWrap(True)
+        self.result.setTextFormat(Qt.RichText)
         layout.addWidget(self.result)
 
         buttons = QHBoxLayout()
@@ -235,11 +238,11 @@ class ConnectPage(QWidget):
         if port is None:
             return
         self._busy(True, f"Testing {port.device}…")
-        self._start_worker(ProbeWorker(port.device))
+        self._start_worker(ProbeWorker(self.settings, port.device))
 
     def _autodetect(self) -> None:
         self._busy(True, "Looking for the chamber on each port…")
-        self._start_worker(ProbeWorker(None))
+        self._start_worker(ProbeWorker(self.settings, None))
 
     def _start_worker(self, worker: ProbeWorker) -> None:
         self._worker = worker
@@ -256,87 +259,145 @@ class ConnectPage(QWidget):
         self.result.style().polish(self.result)
         self.connected.emit(port)
 
-    def _on_not_found(self) -> None:
-        self.result.setText(
-            "No chamber answered. Check the chamber is switched on and that no fault "
-            "is showing on the controller, then try again."
-        )
+    def _on_not_found(self, error) -> None:
+        self.result.setText(describe_error(error))
         self.result.setObjectName("StatusBad")
         self.result.style().polish(self.result)
 
 
+def describe_error(error: ChamberError | None) -> str:
+    """Rich-text explanation of a connection failure, with what to do about it."""
+    if error is None:
+        return (
+            "<b>No chamber answered.</b> Check the chamber is switched on and that "
+            "no fault is showing on the controller, then try again."
+        )
+    holders = getattr(error, "holders", ())
+    which = (
+        f"<p>The port is currently held by: <b>{', '.join(holders)}</b>.</p>"
+        if holders
+        else ""
+    )
+    steps = "".join(f"<li>{step}</li>" for step in error.steps)
+    port = f" on {error.port}" if error.port else ""
+    return f"<b>{error.headline}{port}.</b>{which}<ol>{steps}</ol>"
+
+
 class RecipePage(QWidget):
+    """Choose the test. Every value is editable; nothing is fixed at 48 hours."""
+
     start = Signal(object, str, str)   # recipe, batch, operator
     back = Signal()
 
     def __init__(self, recipe: Recipe, operator: str = "") -> None:
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(48, 40, 48, 40)
-        layout.setSpacing(12)
+        layout.setContentsMargins(48, 32, 48, 28)
+        layout.setSpacing(10)
         layout.addWidget(title("Choose the test"))
 
         self.summary = subtitle("")
         layout.addWidget(self.summary)
-        layout.addSpacing(8)
 
-        form = QVBoxLayout()
-        form.setSpacing(8)
+        form = QWidget()
+        f = QVBoxLayout(form)
+        f.setContentsMargins(0, 8, 0, 0)
+        f.setSpacing(8)
 
         self.batch = QLineEdit()
         self.batch.setPlaceholderText("Board batch name, e.g. MS-4412")
         self.batch.textChanged.connect(self._update_summary)
-        form.addLayout(self._row("Board batch", self.batch))
+        f.addWidget(field_row("Board batch", self.batch))
 
         self.operator = QLineEdit(operator)
         self.operator.setPlaceholderText("Your name")
-        form.addLayout(self._row("Operator", self.operator))
+        f.addWidget(field_row("Operator", self.operator))
 
-        self.cycles = QSpinBox()
-        self.cycles.setRange(1, 200)
-        self.cycles.setValue(recipe.cycles)
+        # --- how long -------------------------------------------------------
+        mode = QWidget()
+        mode_row = QHBoxLayout(mode)
+        mode_row.setContentsMargins(0, 0, 0, 0)
+        self.by_cycles = QRadioButton("cycles")
+        self.by_hours = QRadioButton("hours")
+        self.by_cycles.setChecked(True)
+        group = QButtonGroup(self)
+        group.addButton(self.by_cycles)
+        group.addButton(self.by_hours)
+
+        self.cycles = int_spin(recipe.cycles, 1, 999)
+        self.hours = spin(recipe.total_hours, 0.5, 2000, step=1, decimals=1, suffix=" h")
+        self.hours.setEnabled(False)
+        mode_row.addWidget(self.by_cycles)
+        mode_row.addWidget(self.cycles)
+        mode_row.addSpacing(12)
+        mode_row.addWidget(self.by_hours)
+        mode_row.addWidget(self.hours)
+        mode_row.addStretch(1)
+        f.addWidget(field_row("Run length", mode,
+                              "Set the number of cycles, or a total time and let "
+                              "the program work out the cycles."))
+
+        self.by_cycles.toggled.connect(self._mode_changed)
         self.cycles.valueChanged.connect(self._update_summary)
-        form.addLayout(self._row("Cycles", self.cycles))
+        self.hours.valueChanged.connect(self._update_summary)
 
-        self.cold = QDoubleSpinBox()
-        self.cold.setRange(-25, 0)
-        self.cold.setSuffix(" °C")
-        self.cold.setValue(recipe.cold_c)
-        self.cold.valueChanged.connect(self._update_summary)
-        form.addLayout(self._row("Cold setpoint", self.cold))
+        # --- temperatures ---------------------------------------------------
+        self.cold = spin(recipe.cold_c, -80, 50, decimals=1, suffix=" °C")
+        self.hot = spin(recipe.hot_c, -20, 200, decimals=1, suffix=" °C")
+        f.addWidget(field_row("Cold setpoint", self.cold))
+        f.addWidget(field_row("Hot setpoint", self.hot))
 
-        self.hot = QDoubleSpinBox()
-        self.hot.setRange(0, 85)
-        self.hot.setSuffix(" °C")
-        self.hot.setValue(recipe.hot_c)
-        self.hot.valueChanged.connect(self._update_summary)
-        form.addLayout(self._row("Hot setpoint", self.hot))
+        self.ramp_down = spin(recipe.ramp_down_minutes, 1, 1440, decimals=0, suffix=" min")
+        self.ramp_up = spin(recipe.ramp_up_minutes, 1, 1440, decimals=0, suffix=" min")
+        f.addWidget(field_row("Time to cool", self.ramp_down,
+                              "Chambers usually cool more slowly than they heat, "
+                              "especially with cable ports open."))
+        f.addWidget(field_row("Time to heat", self.ramp_up))
 
-        self.ramp = QDoubleSpinBox()
-        self.ramp.setRange(5, 600)
-        self.ramp.setSuffix(" min")
-        self.ramp.setValue(recipe.ramp_minutes)
-        self.ramp.valueChanged.connect(self._update_summary)
-        form.addLayout(self._row("Ramp time", self.ramp))
+        self.cold_dwell = spin(recipe.cold_dwell_minutes, 1, 1440, decimals=0, suffix=" min")
+        self.hot_dwell = spin(recipe.hot_dwell_minutes, 1, 1440, decimals=0, suffix=" min")
+        f.addWidget(field_row("Hold at cold", self.cold_dwell))
+        f.addWidget(field_row("Hold at hot", self.hot_dwell))
 
-        self.dwell = QDoubleSpinBox()
-        self.dwell.setRange(5, 600)
-        self.dwell.setSuffix(" min")
-        self.dwell.setValue(recipe.cold_dwell_minutes)
-        self.dwell.valueChanged.connect(self._update_summary)
-        form.addLayout(self._row("Dwell at each end", self.dwell))
-
-        self.soak = QCheckBox(
-            "Wait for the chamber to actually reach temperature before counting the dwell"
+        self.soak = check(
+            "Wait until the chamber actually reaches temperature before counting a hold",
+            recipe.guaranteed_soak,
         )
-        self.soak.setChecked(recipe.guaranteed_soak)
-        self.soak.setToolTip(
-            "On: a slow chamber makes the run longer rather than shortening the dwell.\n"
-            "Off: the run takes exactly the scheduled time whatever the chamber does."
-        )
-        form.addWidget(self.soak)
-        layout.addLayout(form)
-        layout.addStretch(1)
+        f.addWidget(field_row("Guaranteed soak", self.soak,
+                              "On: a slow chamber makes the run longer rather than "
+                              "cutting the hold short."))
+
+        # --- advanced -------------------------------------------------------
+        self.show_advanced = check("Show advanced values", False)
+        f.addWidget(self.show_advanced)
+
+        self.advanced = QWidget()
+        a = QVBoxLayout(self.advanced)
+        a.setContentsMargins(0, 0, 0, 0)
+        a.setSpacing(8)
+        self.tolerance = spin(recipe.tolerance_c, 0.1, 20, step=0.5, decimals=1, suffix=" °C")
+        self.idle = spin(recipe.idle_c, -20, 60, decimals=0, suffix=" °C")
+        self.start_from = spin(recipe.start_from_c, -20, 60, decimals=0, suffix=" °C")
+        a.addWidget(field_row("Hold tolerance", self.tolerance,
+                              "How close counts as being at temperature."))
+        a.addWidget(field_row("Return to when finished", self.idle))
+        a.addWidget(field_row("Assumed starting temperature", self.start_from,
+                              "Where the first cooling ramp starts from."))
+        self.advanced.setVisible(False)
+        self.show_advanced.toggled.connect(self.advanced.setVisible)
+        f.addWidget(self.advanced)
+
+        for widget in (self.cold, self.hot, self.ramp_down, self.ramp_up,
+                       self.cold_dwell, self.hot_dwell, self.tolerance,
+                       self.idle, self.start_from):
+            widget.valueChanged.connect(self._update_summary)
+        self.soak.toggled.connect(self._update_summary)
+
+        scroll = QScrollArea()
+        scroll.setWidget(form)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        layout.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
         self.go = primary("Continue")
@@ -350,41 +411,60 @@ class RecipePage(QWidget):
 
         self._update_summary()
 
-    @staticmethod
-    def _row(label: str, widget: QWidget) -> QHBoxLayout:
-        row = QHBoxLayout()
-        text = QLabel(label)
-        text.setMinimumWidth(170)
-        row.addWidget(text)
-        row.addWidget(widget, 1)
-        return row
+    def _mode_changed(self) -> None:
+        by_cycles = self.by_cycles.isChecked()
+        self.cycles.setEnabled(by_cycles)
+        self.hours.setEnabled(not by_cycles)
+        self._update_summary()
 
     def recipe(self) -> Recipe:
-        return Recipe(
-            cycles=self.cycles.value(),
+        base = Recipe(
+            cycles=max(1, self.cycles.value()),
             cold_c=self.cold.value(),
             hot_c=self.hot.value(),
-            ramp_minutes=self.ramp.value(),
-            cold_dwell_minutes=self.dwell.value(),
-            hot_dwell_minutes=self.dwell.value(),
+            ramp_down_minutes=self.ramp_down.value(),
+            ramp_up_minutes=self.ramp_up.value(),
+            cold_dwell_minutes=self.cold_dwell.value(),
+            hot_dwell_minutes=self.hot_dwell.value(),
+            tolerance_c=self.tolerance.value(),
             guaranteed_soak=self.soak.isChecked(),
+            idle_c=self.idle.value(),
+            start_from_c=self.start_from.value(),
         )
+        if self.by_hours.isChecked():
+            base = base.with_duration_hours(self.hours.value())
+        return base
 
     def _update_summary(self) -> None:
         try:
             recipe = self.recipe()
         except ValueError as exc:
             self.summary.setText(str(exc))
+            self.summary.setObjectName("StatusBad")
+            self.summary.style().polish(self.summary)
             self.go.setEnabled(False)
             return
+
+        self.summary.setObjectName("Subtitle")
+        self.summary.style().polish(self.summary)
         self.go.setEnabled(bool(self.batch.text().strip()))
+
+        if self.by_hours.isChecked():
+            self.cycles.blockSignals(True)
+            self.cycles.setValue(recipe.cycles)
+            self.cycles.blockSignals(False)
+
         finish = datetime.now() + timedelta(seconds=recipe.total_seconds)
         self.summary.setText(
-            f"{recipe.cycles} cycles between {recipe.cold_c:g} °C and "
-            f"{recipe.hot_c:g} °C, ramping at {recipe.ramp_c_per_min:.2f} °C/min. "
-            f"Total {format_duration(recipe.total_seconds)} — starting now, "
-            f"finishing {finish.strftime('%A %d %b at %I:%M %p').lstrip('0')}."
+            f"{recipe.cycles} cycle{'s' if recipe.cycles != 1 else ''} between "
+            f"{recipe.cold_c:g} °C and {recipe.hot_c:g} °C — cooling at "
+            f"{recipe.cooling_c_per_min:.2f} °C/min, heating at "
+            f"{recipe.heating_c_per_min:.2f} °C/min. "
+            f"Total {format_duration(recipe.total_seconds)}, finishing "
+            f"{finish.strftime('%A %d %b at %I:%M %p').lstrip('0')}."
         )
 
     def _emit_start(self) -> None:
-        self.start.emit(self.recipe(), self.batch.text().strip(), self.operator.text().strip())
+        self.start.emit(
+            self.recipe(), self.batch.text().strip(), self.operator.text().strip()
+        )

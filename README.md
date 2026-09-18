@@ -85,22 +85,40 @@ Results land in `Documents/Espec Burn-In/<batch> <date>/`:
 | `run.json` | the recipe and live position — this is what makes a crashed run resumable |
 | `report.html` | a self-contained report with the chart and the verdict |
 
-## The default cycle
+## The cycle
 
-12 cycles of 4 hours = 48 hours exactly.
+Nothing is fixed at 48 hours. The default preset is 12 cycles of 4 hours, which
+works out at 48, but every value is editable on the recipe screen:
 
-| Phase | Duration | Setpoint |
+| Phase | Default | Setpoint |
 | --- | --- | --- |
-| Ramp down | 60 min | +80 → −20 °C (1.67 °C/min) |
-| Cold dwell | 60 min | −20 °C |
-| Ramp up | 60 min | −20 → +80 °C (1.67 °C/min) |
-| Hot dwell | 60 min | +80 °C |
+| Cool | 60 min | +80 → −20 °C (1.67 °C/min) |
+| Hold cold | 60 min | −20 °C |
+| Heat | 60 min | −20 → +80 °C (1.67 °C/min) |
+| Hold hot | 60 min | +80 °C |
 
-Cycle count, setpoints, ramp and dwell are all editable on the recipe screen.
+Set the run length either as a **number of cycles** or as a **total time** — ask
+for 72 hours and the program works out the cycles and tells you the finish time.
 
-**Guaranteed soak** is on by default: a dwell does not start counting until the
-chamber is within ±2 °C of target, so a chamber running behind stretches the run
-rather than shortening the time the boards spend at temperature.
+Cooling and heating have separate ramp times, because a chamber rarely cools as
+fast as it heats, and open cable entry ports widen the gap.
+
+**Guaranteed soak** is on by default: a hold does not start counting until the
+chamber is within tolerance of target, so a chamber running behind stretches the
+run rather than shortening the time the boards spend at temperature.
+
+## Settings
+
+Everything the program relies on is editable under **Settings**, so a
+reconfigured controller does not need a new build:
+
+- **Connection** — controller address, baud rate, data bits, parity, stop bits,
+  reply timeout, retries, setpoint write function code, and the range of
+  readings treated as believable.
+- **Run behaviour** — sample interval, how small a setpoint change is worth
+  sending, and how long the chamber may stay unreachable before a run is failed.
+- **Safety limits** — the hard clamp on commanded setpoints, and the runaway
+  detection thresholds. Widening the clamp asks for confirmation.
 
 ## The chamber won't connect
 

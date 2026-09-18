@@ -162,7 +162,8 @@ def render_report(recorder, *, status: str, elapsed_s: float) -> str:
 <tr><td>Preset</td><td>{e(r.name)}</td></tr>
 <tr><td>Cycles</td><td>{r.cycles}</td></tr>
 <tr><td>Temperature range</td><td>{r.cold_c} °C to {r.hot_c} °C</td></tr>
-<tr><td>Ramp</td><td>{r.ramp_minutes:.0f} min ({r.ramp_c_per_min:.2f} °C/min)</td></tr>
+<tr><td>Cooling ramp</td><td>{r.ramp_down_minutes:.0f} min ({r.cooling_c_per_min:.2f} °C/min)</td></tr>
+<tr><td>Heating ramp</td><td>{r.ramp_up_minutes:.0f} min ({r.heating_c_per_min:.2f} °C/min)</td></tr>
 <tr><td>Cold dwell</td><td>{r.cold_dwell_minutes:.0f} min</td></tr>
 <tr><td>Hot dwell</td><td>{r.hot_dwell_minutes:.0f} min</td></tr>
 <tr><td>Tolerance</td><td>±{r.tolerance_c} °C</td></tr>

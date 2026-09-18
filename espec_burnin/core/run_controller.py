@@ -1,8 +1,11 @@
 """The run state machine.
 
 Deliberately free of Qt so it can be tested headlessly and driven at a
-time-scale far above real time.  The UI runs one of these on a worker thread and
-listens to the callbacks.
+time-scale far above real time.  The UI runs one of these on a worker thread
+and listens to the callbacks.
+
+Every threshold is a field on ``RunTuning`` rather than a module constant, so
+all of it is editable in the program.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -23,18 +26,31 @@ from espec_burnin.core.profile import (
     setpoint_at,
 )
 from espec_burnin.core.recorder import Recorder, Sample
+from espec_burnin.hardware.errors import ChamberError, NoReplyError
 
 log = logging.getLogger(__name__)
 
-SAMPLE_INTERVAL_S = 1.0
-SETPOINT_EPSILON_C = 0.1        # do not rewrite the setpoint for trivial changes
-DEFAULT_COMMS_GRACE_S = 15 * 60  # give up on a run after this much silence
-RUNAWAY_DELTA_C = 15.0
-RUNAWAY_FOR_S = 10 * 60
 
-# Hard software clamp. Widening this lives in Advanced settings behind a confirm.
-ABSOLUTE_MIN_C = -25.0
-ABSOLUTE_MAX_C = 85.0
+@dataclass
+class RunTuning:
+    """How the run behaves. All of it editable under Settings."""
+
+    sample_interval_s: float = 1.0
+    setpoint_epsilon_c: float = 0.1   # do not rewrite for trivial changes
+    comms_grace_minutes: float = 15.0  # give up on a run after this much silence
+    runaway_delta_c: float = 15.0
+    runaway_for_minutes: float = 10.0
+    # Hard software clamp. Widening it is behind a confirmation in the UI.
+    absolute_min_c: float = -25.0
+    absolute_max_c: float = 85.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> RunTuning:
+        fields = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in (data or {}).items() if k in fields})
 
 
 class RunState(str, Enum):
@@ -55,6 +71,7 @@ class Status:
     remaining_s: float
     comms_ok: bool
     message: str
+    error: ChamberError | None = None
 
 
 class RunController:
@@ -63,23 +80,21 @@ class RunController:
         driver,
         recipe: Recipe,
         recorder: Recorder,
+        tuning: RunTuning | None = None,
         *,
         on_status: Callable[[Status], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
-        sample_interval_s: float = SAMPLE_INTERVAL_S,
-        comms_grace_s: float = DEFAULT_COMMS_GRACE_S,
         resume_elapsed_s: float = 0.0,
         resume_offset_s: float = 0.0,
     ) -> None:
         self.driver = driver
         self.recipe = recipe
         self.recorder = recorder
+        self.tuning = tuning or RunTuning()
         self.on_status = on_status or (lambda status: None)
         self.clock = clock
         self.sleep = sleep
-        self.sample_interval_s = sample_interval_s
-        self.comms_grace_s = comms_grace_s
 
         self.state = RunState.IDLE
         self._stop = threading.Event()
@@ -91,6 +106,7 @@ class RunController:
         self._last_written_setpoint: float | None = None
         self._comms_lost_since: float | None = None
         self._runaway_since: float | None = None
+        self._last_error: ChamberError | None = None
 
     # -- public API ----------------------------------------------------------
     def stop(self) -> None:
@@ -108,6 +124,7 @@ class RunController:
         self.state = RunState.RUNNING
         self._started_at = self.clock()
         last_tick = self.clock()
+        grace_s = self.tuning.comms_grace_minutes * 60.0
 
         while not self._stop.is_set():
             now = self.clock()
@@ -124,22 +141,30 @@ class RunController:
 
             if comms_ok:
                 self._comms_lost_since = None
+                self._last_error = None
                 self._write_setpoint(point.setpoint_c)
                 if self._is_runaway(point, measured, now):
-                    self._finish(RunState.FAILED, "temperature is not following the setpoint")
+                    self._finish(
+                        RunState.FAILED, "the temperature is not following the setpoint"
+                    )
                     return self.state
                 self.state = RunState.RUNNING
             else:
                 if self._comms_lost_since is None:
                     self._comms_lost_since = now
                 self.state = RunState.COMMS_LOST
-                if now - self._comms_lost_since >= self.comms_grace_s:
-                    self._finish(RunState.FAILED, "no reply from the chamber")
+                if now - self._comms_lost_since >= grace_s:
+                    reason = (
+                        self._last_error.headline
+                        if self._last_error
+                        else "no reply from the chamber"
+                    )
+                    self._finish(RunState.FAILED, reason)
                     return self.state
 
             self._record(point, measured, comms_ok)
             self._emit(point, measured, comms_ok)
-            self.sleep(self.sample_interval_s)
+            self.sleep(self.tuning.sample_interval_s)
 
         self._finish(RunState.STOPPED)
         return self.state
@@ -148,15 +173,22 @@ class RunController:
     def _read(self) -> tuple[float | None, bool]:
         try:
             return self.driver.read_temperature(), True
+        except ChamberError as exc:
+            self._last_error = exc
+            log.warning("read failed: %s", exc)
+            return None, False
         except Exception as exc:  # noqa: BLE001 - any failure is a comms failure
+            self._last_error = NoReplyError(str(exc))
             log.warning("read failed: %s", exc)
             return None, False
 
     def _write_setpoint(self, celsius: float) -> None:
-        clamped = max(ABSOLUTE_MIN_C, min(ABSOLUTE_MAX_C, celsius))
+        clamped = max(
+            self.tuning.absolute_min_c, min(self.tuning.absolute_max_c, celsius)
+        )
         if (
             self._last_written_setpoint is not None
-            and abs(clamped - self._last_written_setpoint) < SETPOINT_EPSILON_C
+            and abs(clamped - self._last_written_setpoint) < self.tuning.setpoint_epsilon_c
         ):
             return
         try:
@@ -181,10 +213,10 @@ class RunController:
         if measured is None or not is_dwell(point.phase):
             self._runaway_since = None
             return False
-        if abs(measured - point.setpoint_c) > RUNAWAY_DELTA_C:
+        if abs(measured - point.setpoint_c) > self.tuning.runaway_delta_c:
             if self._runaway_since is None:
                 self._runaway_since = now
-            return now - self._runaway_since >= RUNAWAY_FOR_S
+            return now - self._runaway_since >= self.tuning.runaway_for_minutes * 60.0
         self._runaway_since = None
         return False
 
@@ -208,7 +240,11 @@ class RunController:
         remaining = max(0.0, self.recipe.total_seconds - self.effective_elapsed_s)
         if not message:
             if not comms_ok:
-                message = "Not getting a temperature from the chamber"
+                message = (
+                    self._last_error.headline
+                    if self._last_error
+                    else "Not getting a temperature from the chamber"
+                )
             elif measured is not None:
                 message = (
                     f"{point.phase.label} — {measured:.1f} °C, "
@@ -223,6 +259,7 @@ class RunController:
                 remaining_s=remaining,
                 comms_ok=comms_ok,
                 message=message,
+                error=None if comms_ok else self._last_error,
             )
         )
 
@@ -232,7 +269,7 @@ class RunController:
         try:
             self.driver.write_setpoint(self.recipe.idle_c)
         except Exception as exc:  # noqa: BLE001 - nothing left to do about it
-            log.warning("could not return chamber to idle: %s", exc)
+            log.warning("could not return the chamber to idle: %s", exc)
         self.recorder.close(
             status=state.value, elapsed_s=self.elapsed_s, offset_s=self._soak_offset_s
         )

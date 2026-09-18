@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.0]
+
+### Added
+- Every value is editable. A Settings screen exposes the connection (address,
+  baud, framing, timeout, retries, write function code), run behaviour (sample
+  interval, comms grace) and safety limits (setpoint clamp, runaway
+  thresholds). Widening the clamp asks for confirmation.
+- Run length can be given as a total time instead of a cycle count; 48 hours is
+  a default, not a fixture.
+- Cooling and heating ramps are set independently, since chambers rarely cool
+  as fast as they heat.
+- Hold tolerance, the temperature the chamber returns to, and the assumed
+  starting temperature are editable on the recipe screen.
+
+### Changed
+- A port held by another program now says so, instead of "check the COM port",
+  and on Linux names the process holding it. Missing ports, permission
+  problems and a silent chamber are told apart and each get their own steps.
+- Serial ports are opened exclusively where the platform allows, so a second
+  program is refused rather than quietly corrupting the conversation.
+
+
 ## [Unreleased]
 
 ### Added
