@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0]
+
+### Added
+- The README now shows the program: screenshots of the home screen, port
+  selection, run setup, a run in progress, a failure, the settings and a
+  measured chamber profile, woven into a step-by-step walkthrough of a real job.
+- `tools/screenshots.py` regenerates every image offscreen, so they are
+  reproducible on any machine with no display and no chamber, and cannot drift
+  from the release by hand.
+- Tests assert the README leads with the download, shows at least four screens,
+  and that every image it references exists and is committed.
+
+### Fixed
+- The selected serial port rendered as a blank highlighted bar. Its text used
+  the inactive-selection colour when the list did not have focus, so the port
+  the user had just picked was unreadable. Found by looking at the generated
+  screenshot.
+- Hint text under form fields is now styled as secondary rather than body text.
+
+
 ## [0.4.0]
 
 ### Added

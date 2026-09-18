@@ -32,4 +32,9 @@ QFrame#Banner {{
 }}
 QListWidget {{ border: 1px solid palette(mid); border-radius: 7px; padding: 4px; }}
 QListWidget::item {{ padding: 9px 8px; border-radius: 5px; }}
+/* Without these the selected row uses the inactive palette when the list does
+   not have focus, and the port the user just picked renders as a blank bar. */
+QListWidget::item:selected {{ background: {ACCENT}; color: white; }}
+QListWidget::item:selected:!active {{ background: {ACCENT}; color: white; }}
+QLabel#Hint {{ color: palette(mid); font-size: 12px; }}
 """

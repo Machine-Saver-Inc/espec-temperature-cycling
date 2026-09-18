@@ -39,7 +39,7 @@ jobs:
                    packaging/windows/espec.ico packaging/linux/build-deb.sh \
                    packaging/linux/espec-burn-in.desktop \
                    packaging/linux/espec-burn-in.png \
-                   packaging/release-notes.md; do
+                   packaging/release-notes.md tools/screenshots.py; do
             if [ -z "$(git ls-files "$f")" ]; then
               echo "::error::$f is not tracked by git - the release build needs it"
               missing=1
