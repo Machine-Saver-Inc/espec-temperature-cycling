@@ -13,7 +13,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 
-pytest.importorskip("PySide6", reason="PySide6 is required for the interface")
+# Importing the PySide6 package succeeds even when the Qt shared libraries
+# are missing; it is the first submodule import that fails. Skip on the
+# submodule so a machine without libEGL skips these tests instead of
+# failing collection and taking the whole suite down with it.
+pytest.importorskip(
+    "PySide6.QtWidgets", reason="PySide6 and its Qt libraries are required for the interface"
+)
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
