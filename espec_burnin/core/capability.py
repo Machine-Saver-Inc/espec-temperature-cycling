@@ -18,6 +18,7 @@ avoids both:
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import math
@@ -204,6 +205,88 @@ def best_profile_for(model: str, serial: str) -> ChamberProfile | None:
     return (loaded or profiles or [None])[0]
 
 
+MEASUREMENT_COLUMNS = [
+    "timestamp",
+    "elapsed_s",
+    "direction",
+    "target_c",
+    "measured_c",
+    "rate_c_per_min",
+    "band_c",
+    "counted",
+]
+
+
+def measurements_root() -> Path:
+    from espec_burnin.core.recorder import results_root
+
+    return results_root() / "Chamber tests"
+
+
+@dataclass
+class CapabilityLog:
+    """Writes the measurement to disk as it happens.
+
+    A speed test runs for hours and is exactly the thing that stalls, so it
+    cannot keep its samples in memory the way it used to: stopping it, or
+    losing power, took the evidence with it. Every sample is flushed, so what
+    is on disk is what has happened so far.
+    """
+
+    chamber_label: str
+    test_name: str
+    started_at: datetime = field(default_factory=datetime.now)
+    root: Path | None = None
+
+    folder: Path = field(init=False)
+    _handle: object = field(init=False, default=None)
+    _writer: object = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        from espec_burnin.core.recorder import safe_name
+
+        stamp = self.started_at.strftime("%Y-%m-%d %H%M")
+        base = self.root or measurements_root()
+        self.folder = base / safe_name(f"{self.chamber_label} - {self.test_name} {stamp}")
+        self.folder.mkdir(parents=True, exist_ok=True)
+
+        path = self.folder / "measurement.csv"
+        new = not path.exists()
+        self._handle = path.open("a", newline="", encoding="utf-8")
+        self._writer = csv.writer(self._handle)
+        if new:
+            self._writer.writerow(MEASUREMENT_COLUMNS)
+            self._handle.flush()
+
+    def record(self, *, elapsed_s: float, direction: Direction, target_c: float,
+               measured_c: float, rate_c_per_min: float | None,
+               counted: bool) -> None:
+        self._writer.writerow([
+            datetime.now().isoformat(timespec="seconds"),
+            round(elapsed_s, 1),
+            direction.value,
+            round(target_c, 1),
+            round(measured_c, 2),
+            "" if rate_c_per_min is None else round(rate_c_per_min, 4),
+            bin_for(measured_c),
+            1 if counted else 0,
+        ])
+        self._handle.flush()
+
+    def close(self, profile: ChamberProfile) -> Path:
+        try:
+            self._handle.flush()
+            self._handle.close()
+        except Exception:  # noqa: BLE001 - closing is best effort
+            pass
+        path = self.folder / "profile.json"
+        try:
+            path.write_text(json.dumps(profile.to_dict(), indent=2), encoding="utf-8")
+        except OSError:
+            pass
+        return self.folder
+
+
 @dataclass
 class CapabilityProgress:
     direction: Direction | None
@@ -269,6 +352,7 @@ class CapabilityTest:
         loaded: bool = True,
         load_notes: str = "",
         on_progress: Callable[[CapabilityProgress], None] | None = None,
+        log: CapabilityLog | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -282,8 +366,10 @@ class CapabilityTest:
             load_notes=load_notes,
         )
         self.on_progress = on_progress or (lambda progress: None)
+        self.log = log
         self.clock = clock
         self.sleep = sleep
+        self.folder: Path | None = None
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -311,6 +397,8 @@ class CapabilityTest:
             log.warning("could not return the chamber to idle: %s", exc)
 
         self.profile.aborted = self._stop.is_set()
+        if self.log is not None:
+            self.folder = self.log.close(self.profile)
         self._emit(None, self.settings.idle_c, started, None,
                    "Finished. The chamber is returning to room temperature.", done=True)
 
@@ -352,6 +440,7 @@ class CapabilityTest:
             )
 
             rate = self._slope_c_per_min(samples)
+            counted = False
             if rate is not None:
                 magnitude = abs(rate)
                 moving_the_right_way = (
@@ -360,11 +449,18 @@ class CapabilityTest:
                 if moving_the_right_way and magnitude > self.settings.plateau_c_per_min:
                     per_bin.setdefault(bin_for(temperature), []).append(magnitude)
                     plateau_since = None
+                    counted = True
                 else:
                     if plateau_since is None:
                         plateau_since = now
                     elif (now - plateau_since) / 60.0 >= self.settings.plateau_minutes:
                         break   # the chamber has stopped making progress
+
+            if self.log is not None:
+                self.log.record(
+                    elapsed_s=now - started, direction=direction, target_c=target_c,
+                    measured_c=temperature, rate_c_per_min=rate, counted=counted,
+                )
 
             reached = (
                 temperature <= target_c if direction is Direction.COOLING

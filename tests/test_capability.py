@@ -8,6 +8,8 @@ check the profile recovers them.
 
 from __future__ import annotations
 
+import csv
+import json
 import sys
 
 import pytest
@@ -208,3 +210,150 @@ def test_widening_the_limits_widens_what_the_measurement_may_command():
     )
     assert settings.cold_target_clamped == -40.0
     assert settings.hot_target_clamped == 105.0
+
+
+# --- the measurement must survive being stopped -----------------------------
+# A speed test runs for hours and is exactly the thing that stalls. Keeping its
+# samples in memory meant stopping it threw away the evidence of the stall.
+
+def test_every_sample_is_on_disk_before_the_test_finishes(tmp_path):
+    """Written and flushed as it goes, not gathered up at the end."""
+    from espec_burnin.core.capability import CapabilityLog
+
+    driver = RecordingDriver(temperature=25.0)
+    log = CapabilityLog("Espec BTZ-133 - Serial 0612223", "Loaded", root=tmp_path)
+    settings = CapabilitySettings(
+        cold_target_c=-25.0, hot_target_c=85.0,
+        sample_interval_s=1.0, slope_window_s=180.0,
+        plateau_minutes=5.0, timeout_minutes=60.0,
+    )
+
+    class Clock:
+        now = 0.0
+
+        def __call__(self):
+            return self.now
+
+        def sleep(self, _s):
+            self.now += 30.0
+            driver.temperature -= 1.0      # a chamber that keeps cooling
+
+    clock = Clock()
+    test = CapabilityTest(driver, "Loaded", settings, log=log,
+                          clock=clock, sleep=clock.sleep)
+    test.run()
+
+    csv_path = log.folder / "measurement.csv"
+    assert csv_path.exists()
+    rows = csv_path.read_text(encoding="utf-8").strip().splitlines()
+    assert rows[0].startswith("timestamp,elapsed_s,direction,target_c,measured_c")
+    assert len(rows) > 5, "the samples were not written as they happened"
+    assert (log.folder / "profile.json").exists()
+
+
+def test_a_stalled_chamber_is_visible_in_the_log(tmp_path):
+    """A stall is a run of samples that counted toward no band."""
+    from espec_burnin.core.capability import CapabilityLog
+
+    driver = RecordingDriver(temperature=25.0)
+    log = CapabilityLog("Espec BTZ-133", "Stalling", root=tmp_path)
+    settings = CapabilitySettings(
+        cold_target_c=-40.0, hot_target_c=85.0,
+        absolute_min_c=-40.0, absolute_max_c=85.0,
+        sample_interval_s=1.0, slope_window_s=180.0,
+        plateau_minutes=3.0, timeout_minutes=60.0,
+    )
+
+    class Clock:
+        now = 0.0
+        ticks = 0
+
+        def __call__(self):
+            return self.now
+
+        def sleep(self, _s):
+            self.now += 30.0
+            self.ticks += 1
+            # Cools for a while, then stops moving: the stall.
+            if self.ticks < 8:
+                driver.temperature -= 2.0
+
+    clock = Clock()
+    CapabilityTest(driver, "Stalling", settings, log=log,
+                   clock=clock, sleep=clock.sleep).run()
+
+    rows = list(csv.DictReader((log.folder / "measurement.csv").open(encoding="utf-8")))
+    assert rows
+    counted = [r for r in rows if r["counted"] == "1"]
+    stalled = [r for r in rows if r["counted"] == "0"]
+    assert counted, "nothing was recorded while the chamber was actually cooling"
+    assert stalled, "the stall left no trace in the log"
+
+    # The coldest band still making progress is where it gave up.
+    coldest_moving = min(float(r["measured_c"]) for r in counted)
+    assert coldest_moving > -40.0
+
+
+def test_the_log_records_the_rate_so_the_slowdown_can_be_plotted(tmp_path):
+    from espec_burnin.core.capability import CapabilityLog
+
+    driver = RecordingDriver(temperature=25.0)
+    log = CapabilityLog("Chamber", "Rates", root=tmp_path)
+    settings = CapabilitySettings(
+        sample_interval_s=1.0, slope_window_s=180.0,
+        plateau_minutes=5.0, timeout_minutes=60.0,
+    )
+
+    class Clock:
+        now = 0.0
+
+        def __call__(self):
+            return self.now
+
+        def sleep(self, _s):
+            self.now += 30.0
+            driver.temperature -= 1.5
+
+    clock = Clock()
+    CapabilityTest(driver, "Rates", settings, log=log,
+                   clock=clock, sleep=clock.sleep).run()
+
+    rows = list(csv.DictReader((log.folder / "measurement.csv").open(encoding="utf-8")))
+    with_rate = [r for r in rows if r["rate_c_per_min"]]
+    assert with_rate, "no rate was ever recorded"
+    assert all(r["band_c"] for r in rows), "every sample must carry its band"
+    assert {r["direction"] for r in rows} <= {"cooling", "heating"}
+
+
+def test_stopping_early_still_leaves_a_usable_file(tmp_path):
+    from espec_burnin.core.capability import CapabilityLog
+
+    driver = RecordingDriver(temperature=25.0)
+    log = CapabilityLog("Chamber", "Stopped", root=tmp_path)
+    settings = CapabilitySettings(sample_interval_s=1.0, slope_window_s=180.0,
+                                  plateau_minutes=5.0, timeout_minutes=60.0)
+
+    class Clock:
+        now = 0.0
+        ticks = 0
+
+        def __call__(self):
+            return self.now
+
+        def sleep(self, _s):
+            self.now += 30.0
+            self.ticks += 1
+            driver.temperature -= 1.0
+            if self.ticks == 6:
+                test.stop()          # the operator presses Stop
+
+    clock = Clock()
+    test = CapabilityTest(driver, "Stopped", settings, log=log,
+                          clock=clock, sleep=clock.sleep)
+    profile = test.run()
+
+    assert profile.aborted
+    rows = (log.folder / "measurement.csv").read_text(encoding="utf-8").strip().splitlines()
+    assert len(rows) >= 5, "stopping threw away the samples"
+    saved = json.loads((log.folder / "profile.json").read_text(encoding="utf-8"))
+    assert saved["aborted"] is True

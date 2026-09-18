@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from espec_burnin import APP_NAME, __version__
-from espec_burnin.core.capability import CapabilityTest
+from espec_burnin.core.capability import CapabilityLog, CapabilityTest
 from espec_burnin.core.chambers import find_by_adapter, save_chamber
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.core.recorder import Recorder, results_root
@@ -603,10 +603,22 @@ class MainWindow(QMainWindow):
         self.settings["chamber_serial"] = chamber.serial
         settings_mod.save(self.settings)
 
+        # Written as it happens: a speed test runs for hours and stalling is
+        # exactly what it is looking for, so stopping it must not lose the data.
+        try:
+            log = CapabilityLog(chamber.label, name)
+        except OSError as exc:
+            log = None
+            QMessageBox.warning(
+                self, "Could not open a log file",
+                f"The measurement will still run, but nothing will be written to "
+                f"disk as it goes.\n\n{exc}",
+            )
+
         test = CapabilityTest(
             self.capability_driver, name, settings,
             chamber_model=chamber.model, chamber_serial=chamber.serial,
-            loaded=loaded, load_notes=notes,
+            loaded=loaded, load_notes=notes, log=log,
         )
         self.capability_worker = CapabilityWorker(test)
         self.capability_worker.progress.connect(
@@ -615,6 +627,7 @@ class MainWindow(QMainWindow):
         self.capability_worker.done.connect(
             self._capability_measured, Qt.QueuedConnection
         )
+        self.capability_worker_folder = test
         self.keep_awake.start()
         self.capability_worker.start()
 
@@ -635,7 +648,9 @@ class MainWindow(QMainWindow):
             self.capability_driver.close()
             self.capability_driver = None
         self.capability_worker = None
-        self.capability_page.show_result(profile)
+        folder = getattr(self.capability_worker_folder, "folder", None) \
+            if hasattr(self, "capability_worker_folder") else None
+        self.capability_page.show_result(profile, folder)
 
     def _capability_finished(self, profile) -> None:
         self._reload_recipe_profiles()

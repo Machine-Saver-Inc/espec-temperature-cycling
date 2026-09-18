@@ -167,6 +167,19 @@ Runs record the chamber too, so a report says which one it came from.
   real run will be — same boards, same cables through the ports — and say so
   when you save the profile.
 
+Every sample is written to disk as it happens, into
+`Documents/Espec Burn-In/Chamber tests/<chamber> - <test> <date>/`:
+
+| File | What it is |
+| --- | --- |
+| `measurement.csv` | every sample: timestamp, direction, target, measured, rate, band, and whether it counted as progress |
+| `profile.json` | the banded summary and the limits reached |
+
+A measurement runs for hours and a stalling chamber is exactly what it is
+looking for, so **stopping it early keeps everything taken up to that point.**
+`tools/analyse_measurement.py` turns either file into a band-by-band breakdown
+of where the chamber slowed and where it stopped making progress.
+
 It also records the coldest and hottest actually reached, so a recipe asking for
 −20 °C in a chamber that only manages −17 is flagged before you start. Once a
 profile exists, the recipe screen warns when a ramp is too fast and offers

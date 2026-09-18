@@ -367,6 +367,12 @@ class CapabilityPage(QWidget):
         self.save_button = primary("Save this profile")
         self.save_button.clicked.connect(self._save)
         buttons.addWidget(self.save_button)
+
+        self.open_folder = QPushButton("Open the measurement data")
+        self.open_folder.clicked.connect(self._open_folder)
+        self.open_folder.hide()
+        buttons.addWidget(self.open_folder)
+
         buttons.addStretch(1)
         discard = QPushButton("Discard")
         discard.clicked.connect(lambda: self.finished.emit(None))
@@ -374,8 +380,10 @@ class CapabilityPage(QWidget):
         layout.addLayout(buttons)
         return page
 
-    def show_result(self, profile: ChamberProfile) -> None:
+    def show_result(self, profile: ChamberProfile, folder=None) -> None:
         self._profile = profile
+        self._folder = folder
+        self.open_folder.setVisible(folder is not None)
         self.stack.setCurrentIndex(RESULT)
 
         def table(rates: dict, direction: Direction) -> str:
@@ -412,7 +420,8 @@ class CapabilityPage(QWidget):
                 )
 
         aborted = (
-            "<p><b>The test was stopped early, so this profile is incomplete.</b></p>"
+            "<p><b>The test was stopped early, so this profile is incomplete.</b> "
+            "Every sample taken up to that point was still written to disk.</p>"
             if profile.aborted else ""
         )
 
@@ -423,6 +432,12 @@ class CapabilityPage(QWidget):
             "<p>Speed falls off near the extremes, which is why a single average "
             "figure overpromises. The recipe screen uses the whole curve.</p>"
         )
+
+    def _open_folder(self) -> None:
+        import webbrowser
+
+        if self._folder is not None:
+            webbrowser.open(self._folder.as_uri())
 
     def _save(self) -> None:
         try:

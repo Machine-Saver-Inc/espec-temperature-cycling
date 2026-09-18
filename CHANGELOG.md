@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0]
+
+### Added
+- **The chamber speed test now writes every sample to disk as it happens.** It
+  kept them in memory, so stopping a measurement — or losing power — threw away
+  the evidence of the stall it was run to find. Each sample is flushed to
+  `measurement.csv` under `Documents/Espec Burn-In/Chamber tests/`, with the
+  measured temperature, the rate, the 5 °C band, and whether that sample counted
+  as progress. A stall is a run of samples that counted as none.
+- The results screen has **Open the measurement data**, and says explicitly that
+  a stopped test still kept everything up to that point.
+- `tools/analyse_measurement.py` turns a `measurement.csv` or a saved
+  `profile.json` into a band-by-band breakdown: minutes spent in each band,
+  average rate, where progress stopped, and the slowest band.
+
+
 ## [0.7.0]
 
 ### Changed
