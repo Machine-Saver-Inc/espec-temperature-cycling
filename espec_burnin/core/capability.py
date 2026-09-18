@@ -176,14 +176,38 @@ class CapabilityProgress:
 
 @dataclass
 class CapabilitySettings:
+    """Where to drive the chamber, and the limits that apply while doing it.
+
+    The clamp is the same one a run uses. Measuring the chamber is still
+    driving the chamber, so it cannot be a way around the safety limits.
+    """
+
     cold_target_c: float = -25.0
     hot_target_c: float = 85.0
+    absolute_min_c: float = -25.0
+    absolute_max_c: float = 85.0
     sample_interval_s: float = DEFAULT_SAMPLE_INTERVAL_S
     slope_window_s: float = DEFAULT_SLOPE_WINDOW_S
     plateau_c_per_min: float = DEFAULT_PLATEAU_C_PER_MIN
     plateau_minutes: float = DEFAULT_PLATEAU_MINUTES
     timeout_minutes: float = DEFAULT_TIMEOUT_MINUTES
     idle_c: float = 25.0
+
+    def clamped(self, celsius: float) -> float:
+        return max(self.absolute_min_c, min(self.absolute_max_c, celsius))
+
+    @property
+    def cold_target_clamped(self) -> float:
+        return self.clamped(self.cold_target_c)
+
+    @property
+    def hot_target_clamped(self) -> float:
+        return self.clamped(self.hot_target_c)
+
+    @property
+    def targets_were_limited(self) -> bool:
+        return (self.cold_target_clamped != self.cold_target_c
+                or self.hot_target_clamped != self.hot_target_c)
 
 
 class CapabilityTest:
@@ -228,12 +252,14 @@ class CapabilityTest:
             return self.profile
         self.profile.ambient_c = ambient
 
-        self._leg(Direction.COOLING, self.settings.cold_target_c, started)
+        # Clamp here, not at the call site: this is the only place that
+        # commands a setpoint during a measurement.
+        self._leg(Direction.COOLING, self.settings.cold_target_clamped, started)
         if not self._stop.is_set():
-            self._leg(Direction.HEATING, self.settings.hot_target_c, started)
+            self._leg(Direction.HEATING, self.settings.hot_target_clamped, started)
 
         try:
-            self.driver.write_setpoint(self.settings.idle_c)
+            self.driver.write_setpoint(self.settings.clamped(self.settings.idle_c))
         except Exception as exc:  # noqa: BLE001 - nothing more to do
             log.warning("could not return the chamber to idle: %s", exc)
 
@@ -245,6 +271,7 @@ class CapabilityTest:
 
     # -- one direction -------------------------------------------------------
     def _leg(self, direction: Direction, target_c: float, started: float) -> None:
+        target_c = self.settings.clamped(target_c)
         try:
             self.driver.write_setpoint(target_c)
         except Exception as exc:  # noqa: BLE001 - treated as an abort

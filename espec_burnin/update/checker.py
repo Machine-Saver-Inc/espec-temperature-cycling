@@ -21,7 +21,30 @@ log = logging.getLogger(__name__)
 
 LATEST_RELEASE_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases"
-TIMEOUT_S = 5.0
+TIMEOUT_S = 15.0          # a corporate proxy is slower than a laptop on wifi
+ATTEMPTS = 2
+
+
+@dataclass(frozen=True)
+class CheckOutcome:
+    """What a check actually established.
+
+    A failed request and "you are on the newest release" are completely
+    different facts, and telling a user the reassuring one when the truthful one
+    is "I could not reach GitHub" is how a broken updater goes unnoticed.
+    """
+
+    release: Release | None = None     # set only when something NEWER exists
+    latest: Release | None = None      # whatever the feed returned, if reached
+    error: str | None = None
+
+    @property
+    def reached_github(self) -> bool:
+        return self.error is None
+
+    @property
+    def update_available(self) -> bool:
+        return self.release is not None
 
 
 @dataclass(frozen=True)
@@ -57,12 +80,36 @@ def asset_pattern_for_this_platform() -> tuple[str, ...]:
     return ()
 
 
-def fetch_latest_release(url: str = LATEST_RELEASE_URL) -> Release | None:
-    """Ask GitHub for the newest release. Returns None on any failure.
+def _open(request, timeout: float):
+    """Open the request, falling back to certifi if the system trust store fails.
 
-    Never raises and never blocks startup: no network, DNS failure, a proxy in
-    the way and GitHub being down all look the same from here, and none of them
-    are worth interrupting the user over.
+    The system store is tried first on purpose: a corporate proxy that
+    intercepts TLS installs its own CA there, and certifi would reject it.
+    certifi is the fallback for a frozen build whose system store is unusable.
+    """
+    try:
+        return urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.URLError as exc:
+        import ssl
+
+        if not isinstance(exc.reason, ssl.SSLError):
+            raise
+        try:
+            import certifi
+        except ImportError:
+            raise exc from None
+        log.info("system trust store rejected the connection; trying certifi")
+        context = ssl.create_default_context(cafile=certifi.where())
+        return urllib.request.urlopen(request, timeout=timeout, context=context)
+
+
+def fetch_latest_release_detailed(
+    url: str = LATEST_RELEASE_URL, opener=None
+) -> tuple[Release | None, str | None]:
+    """Ask GitHub for the newest release.
+
+    Returns ``(release, None)`` on success or ``(None, reason)`` on failure.
+    Never raises: startup must not wait on the network.
     """
     request = urllib.request.Request(
         url,
@@ -71,12 +118,19 @@ def fetch_latest_release(url: str = LATEST_RELEASE_URL) -> Release | None:
             "User-Agent": f"espec-burn-in/{__version__}",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        log.info("update check skipped: %s", exc)
-        return None
+    open_it = opener or _open
+
+    last: Exception | None = None
+    for attempt in range(ATTEMPTS):
+        try:
+            with open_it(request, timeout=TIMEOUT_S) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            break
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+            last = exc
+            log.info("update check attempt %d failed: %s", attempt + 1, exc)
+    else:
+        return None, describe_failure(last)
 
     assets = {a["name"]: a["browser_download_url"] for a in data.get("assets", [])}
     return Release(
@@ -86,7 +140,36 @@ def fetch_latest_release(url: str = LATEST_RELEASE_URL) -> Release | None:
         html_url=data.get("html_url", RELEASES_PAGE),
         assets=assets,
         checksums_url=assets.get("SHA256SUMS"),
-    )
+    ), None
+
+
+def describe_failure(exc: Exception | None) -> str:
+    """Say what went wrong in words the person at the chamber can act on."""
+    if exc is None:
+        return "The update check did not complete."
+    text = str(exc)
+    lowered = text.lower()
+    if "certificate" in lowered or "ssl" in lowered:
+        return ("The secure connection to GitHub could not be verified. This is "
+                "usually a company proxy or an out-of-date certificate store.\n\n"
+                f"{text}")
+    if "timed out" in lowered or isinstance(exc, TimeoutError):
+        return ("GitHub did not answer in time. The network may be slow or "
+                f"blocked.\n\n{text}")
+    if "name or service not known" in lowered or "getaddrinfo" in lowered \
+            or "nodename nor servname" in lowered:
+        return ("github.com could not be looked up. This computer may have no "
+                f"internet connection.\n\n{text}")
+    if "forbidden" in lowered or "403" in text:
+        return ("GitHub refused the request. If several programs share this "
+                f"connection, the hourly limit may have been reached.\n\n{text}")
+    return f"Could not reach GitHub.\n\n{text}"
+
+
+def fetch_latest_release(url: str = LATEST_RELEASE_URL) -> Release | None:
+    """Backwards-compatible wrapper. Prefer fetch_latest_release_detailed."""
+    release, _error = fetch_latest_release_detailed(url)
+    return release
 
 
 def is_newer(release: Release, current: str = __version__) -> bool:
@@ -94,10 +177,31 @@ def is_newer(release: Release, current: str = __version__) -> bool:
 
 
 def check_for_update(current: str = __version__) -> Release | None:
-    release = fetch_latest_release()
-    if release and is_newer(release, current):
-        return release
-    return None
+    """Backwards-compatible wrapper. Prefer check_for_update_detailed."""
+    return check_for_update_detailed(current).release
+
+
+def outcome_kind(outcome: CheckOutcome) -> str:
+    """What the UI should say: 'update', 'current' or 'unknown'.
+
+    Kept out of the window so it can be tested directly. Conflating 'unknown'
+    with 'current' is what made a broken update check look like a working one.
+    """
+    if outcome.update_available:
+        return "update"
+    if outcome.reached_github:
+        return "current"
+    return "unknown"
+
+
+def check_for_update_detailed(current: str = __version__) -> CheckOutcome:
+    """Check, and report what was actually established."""
+    latest, error = fetch_latest_release_detailed()
+    if error is not None:
+        return CheckOutcome(error=error)
+    if latest is not None and is_newer(latest, current):
+        return CheckOutcome(release=latest, latest=latest)
+    return CheckOutcome(latest=latest)
 
 
 def asset_for_this_platform(release: Release) -> tuple[str, str] | None:

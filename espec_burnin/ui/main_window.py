@@ -33,7 +33,13 @@ from espec_burnin.ui.keepawake import KeepAwake
 from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_error
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
-from espec_burnin.update.checker import Release, check_for_update
+from espec_burnin.update.checker import (
+    RELEASES_PAGE,
+    CheckOutcome,
+    Release,
+    check_for_update_detailed,
+    outcome_kind,
+)
 from espec_burnin.update.installer import (
     Applied,
     UpdateError,
@@ -49,12 +55,12 @@ HOME, CONNECT, RECIPE, RUN, SETTINGS, CAPABILITY = range(6)
 
 
 class UpdateWorker(QThread):
-    available = Signal(object)
+    """Reports what the check established, not just the happy case."""
+
+    done = Signal(object)          # CheckOutcome
 
     def run(self) -> None:
-        release = check_for_update()
-        if release is not None:
-            self.available.emit(release)
+        self.done.emit(check_for_update_detailed())
 
 
 class DownloadWorker(QThread):
@@ -170,7 +176,11 @@ class MainWindow(QMainWindow):
         self.home.settings_requested.connect(self._open_settings)
         self.home.capability_requested.connect(self._open_capability)
         self.home.check_now_requested.connect(self._check_now)
-        self.home.set_version_line(__version__, self.settings.get("last_update_check"))
+        self.home.set_version_line(
+            __version__,
+            self.settings.get("last_update_check"),
+            failed=self.settings.get("last_update_check_failed", False),
+        )
         self.stack.addWidget(self.home)
 
         self.connect_page = ConnectPage(self.connection)
@@ -198,7 +208,7 @@ class MainWindow(QMainWindow):
         self.settings_page.back.connect(lambda: self.stack.setCurrentIndex(HOME))
         self.stack.addWidget(self.settings_page)
 
-        self.capability_page = CapabilityPage()
+        self.capability_page = CapabilityPage(self.tuning)
         self.capability_page.back.connect(lambda: self.stack.setCurrentIndex(HOME))
         self.capability_page.start_requested.connect(self._start_capability)
         self.capability_page.finished.connect(self._capability_finished)
@@ -377,20 +387,57 @@ class MainWindow(QMainWindow):
         if not self.settings.get("check_for_updates", True):
             return
         self._update_worker = UpdateWorker()
-        self._update_worker.available.connect(self._on_update_available)
-        self._update_worker.finished.connect(self._record_check)
+        self._update_worker.done.connect(self._on_check_done, Qt.QueuedConnection)
         self._update_worker.start()
 
-    def _on_update_available(self, release: Release) -> None:
-        self._pending_release = release
-        if self.worker is None:      # never interrupt a run
-            self.banner.offer(release)
+    def _on_check_done(self, outcome: CheckOutcome, announce: bool = False) -> None:
+        """One place that decides what a check meant."""
+        self._last_check_failed = not outcome.reached_github
+        self._record_check(ok=outcome.reached_github)
 
-    def _record_check(self) -> None:
+        kind = outcome_kind(outcome)
+        if kind == "update":
+            self._pending_release = outcome.release
+            if self.worker is None:          # never interrupt a run
+                self.banner.offer(outcome.release)
+            return
+
+        if not announce:
+            return
+
+        if kind == "current":
+            QMessageBox.information(
+                self, "Up to date",
+                f"Version {__version__} is the newest release.",
+            )
+            return
+
+        # Never claim to be up to date on the strength of a failed request.
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Could not check for updates")
+        box.setText("The program could not reach GitHub, so it does not know "
+                    "whether a newer version exists.")
+        box.setInformativeText(outcome.error or "")
+        open_page = box.addButton("Open the releases page", QMessageBox.ActionRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_page:
+            webbrowser.open(RELEASES_PAGE)
+
+    def _record_check(self, ok: bool = True) -> None:
         stamp = datetime.now().strftime("%d %b %Y %H:%M")
-        self.settings["last_update_check"] = stamp
+        if ok:
+            self.settings["last_update_check"] = stamp
+            self.settings["last_update_check_failed"] = False
+        else:
+            self.settings["last_update_check_failed"] = True
         settings_mod.save(self.settings)
-        self.home.set_version_line(__version__, stamp)
+        self.home.set_version_line(
+            __version__,
+            self.settings.get("last_update_check"),
+            failed=not ok,
+        )
 
     def _check_now(self) -> None:
         """Manual check, for anyone who wants to ask rather than wait."""
@@ -401,17 +448,11 @@ class MainWindow(QMainWindow):
             )
             return
         self._manual_check = UpdateWorker()
-        self._manual_check.available.connect(self._on_update_available)
-        self._manual_check.finished.connect(self._manual_check_finished)
+        self._manual_check.done.connect(
+            lambda outcome: self._on_check_done(outcome, announce=True),
+            Qt.QueuedConnection,
+        )
         self._manual_check.start()
-
-    def _manual_check_finished(self) -> None:
-        self._record_check()
-        if self._pending_release is None:
-            QMessageBox.information(
-                self, "Up to date",
-                f"Version {__version__} is the newest release.",
-            )
 
     # -- doing the update ----------------------------------------------------
     def _download_update(self, release: Release) -> None:
@@ -523,8 +564,9 @@ class MainWindow(QMainWindow):
             return
         if QMessageBox.question(
             self, "Start the measurement?",
-            f"The chamber will be driven to {settings.cold_target_c:g} \u00b0C and then "
-            f"{settings.hot_target_c:g} \u00b0C, and left to settle at each end.\n\n"
+            f"The chamber will be driven to {settings.cold_target_clamped:g} \u00b0C "
+            f"and then {settings.hot_target_clamped:g} \u00b0C, and left to settle "
+            f"at each end.\n\n"
             "This takes a few hours and this computer must stay on throughout.",
             QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Yes,
         ) != QMessageBox.Yes:

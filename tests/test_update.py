@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import sys
+import urllib.error
 
 import pytest
 
@@ -206,3 +208,111 @@ def test_an_appimage_download_outside_an_appimage_is_not_forced(monkeypatch, tmp
     blob.write_bytes(PAYLOAD)
     result = apply_update(blob)
     assert result.outcome is Applied.MANUAL
+
+
+# --- issue #2: a failed check reported "up to date" -------------------------
+# Running 0.4.0 with 0.5.0 published, "Check for updates" said the installed
+# version was newest. fetch returned None both when nothing was newer and when
+# the request failed, and the window turned that None into a reassurance.
+
+from espec_burnin.update.checker import (  # noqa: E402
+    CheckOutcome,
+    check_for_update_detailed,
+    describe_failure,
+    fetch_latest_release_detailed,
+    outcome_kind,
+)
+
+FEED = {
+    "tag_name": "v0.5.0",
+    "body": "notes",
+    "html_url": "https://example.invalid/r",
+    "assets": [
+        {"name": "EspecBurnIn-Setup-0.5.0.exe", "browser_download_url": "u"},
+        {"name": "SHA256SUMS", "browser_download_url": "s"},
+    ],
+}
+
+
+def feed_opener(payload=FEED):
+    def _open(request, timeout=None):
+        return FakeResponse(json.dumps(payload).encode())
+    return _open
+
+
+def failing_opener(exc):
+    def _open(request, timeout=None):
+        raise exc
+    return _open
+
+
+def test_a_reachable_feed_with_a_newer_release_offers_it(monkeypatch):
+    monkeypatch.setattr(
+        "espec_burnin.update.checker.fetch_latest_release_detailed",
+        lambda *a, **k: fetch_latest_release_detailed(opener=feed_opener()),
+    )
+    outcome = check_for_update_detailed("0.4.0")
+    assert outcome.reached_github
+    assert outcome.update_available
+    assert outcome_kind(outcome) == "update"
+    assert outcome.release.version == "0.5.0"
+
+
+def test_a_failed_check_is_never_reported_as_up_to_date(monkeypatch):
+    """The regression. 'I could not ask' must not render as 'you are current'."""
+    monkeypatch.setattr(
+        "espec_burnin.update.checker.fetch_latest_release_detailed",
+        lambda *a, **k: fetch_latest_release_detailed(
+            opener=failing_opener(urllib.error.URLError("no route to host"))
+        ),
+    )
+    outcome = check_for_update_detailed("0.4.0")
+    assert not outcome.reached_github
+    assert not outcome.update_available
+    assert outcome_kind(outcome) == "unknown"      # not "current"
+    assert outcome.error
+
+
+def test_being_genuinely_current_is_distinguishable(monkeypatch):
+    monkeypatch.setattr(
+        "espec_burnin.update.checker.fetch_latest_release_detailed",
+        lambda *a, **k: fetch_latest_release_detailed(opener=feed_opener()),
+    )
+    outcome = check_for_update_detailed("0.5.0")
+    assert outcome.reached_github
+    assert outcome_kind(outcome) == "current"
+
+
+def test_the_three_outcomes_are_mutually_exclusive():
+    assert outcome_kind(CheckOutcome(error="boom")) == "unknown"
+    assert outcome_kind(CheckOutcome()) == "current"
+
+
+def test_a_failure_is_retried_before_giving_up():
+    calls = []
+
+    def flaky(request, timeout=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise urllib.error.URLError("first attempt dropped")
+        return FakeResponse(json.dumps(FEED).encode())
+
+    release, error = fetch_latest_release_detailed(opener=flaky)
+    assert error is None
+    assert release.version == "0.5.0"
+    assert len(calls) == 2, "a single dropped connection must not fail the check"
+
+
+@pytest.mark.parametrize("exc,expected", [
+    (urllib.error.URLError("[Errno -2] Name or service not known"), "no internet"),
+    (TimeoutError("timed out"), "did not answer in time"),
+    (urllib.error.URLError("certificate verify failed"), "could not be verified"),
+])
+def test_the_reason_is_explained_in_useful_words(exc, expected):
+    assert expected in describe_failure(exc)
+
+
+def test_the_explanation_always_includes_the_underlying_error():
+    """Whoever reads the dialog has to be able to report what it said."""
+    text = describe_failure(urllib.error.URLError("something unusual"))
+    assert "something unusual" in text

@@ -3,3 +3,4 @@ pyqtgraph>=0.13
 pyserial>=3.5
 minimalmodbus>=2.1
 numpy>=1.24
+certifi>=2024.2.2

@@ -124,10 +124,17 @@ class HomePage(QWidget):
         footer.addStretch(1)
         layout.addLayout(footer)
 
-    def set_version_line(self, version: str, last_checked: str | None) -> None:
-        when = f" \u00b7 last checked {last_checked}" if last_checked else \
-               " \u00b7 not checked yet"
+    def set_version_line(self, version: str, last_checked: str | None,
+                         failed: bool = False) -> None:
+        if failed:
+            when = " \u00b7 could not reach GitHub to check"
+        elif last_checked:
+            when = f" \u00b7 last checked {last_checked}"
+        else:
+            when = " \u00b7 not checked yet"
         self.version_label.setText(f"Version {version}{when}")
+        self.version_label.setObjectName("StatusWarn" if failed else "Hint")
+        self.version_label.style().polish(self.version_label)
 
     def set_connection(self, text: str, ok: bool) -> None:
         self.status.setText(text)

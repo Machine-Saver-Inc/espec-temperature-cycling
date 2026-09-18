@@ -1,6 +1,29 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0]
+
+### Fixed
+- **A failed update check reported "you are up to date" (#2).** The check
+  returned the same empty answer whether nothing newer existed or the request
+  had failed, and the window turned that into a reassurance. Running 0.4.0 with
+  0.5.0 published, *Check for updates* said 0.4.0 was newest. A check now
+  reports one of three things — an update, genuinely current, or could not
+  reach GitHub — and the last of those shows what went wrong (no internet, a
+  proxy, an unverifiable certificate, a rate limit) with the underlying error
+  so it can be reported. The home screen says so too rather than showing a
+  stale timestamp.
+- **The chamber speed test could drive past the safety limits (#1).** It wrote
+  setpoints straight to the driver, bypassing the clamp every run obeys, and
+  the setup screen offered -40 °C and +105 °C against a clamp of -25/+85. The
+  measurement is now clamped like a run, the targets are bounded by the limits
+  in Settings, and the confirmation quotes what will actually be commanded.
+
+### Changed
+- The update check waits 15 s rather than 5 and retries once, so one slow or
+  dropped response on a corporate link no longer reads as a failure.
+- If the system certificate store rejects the connection, the check retries
+  with a bundled CA list. The system store is still tried first, because a
+  proxy that intercepts TLS installs its own CA there.
 
 ### Changed
 - The setpoint write function code is documented as confirmed rather than

@@ -58,8 +58,11 @@ class CapabilityPage(QWidget):
     back = Signal()
     start_requested = Signal(object, str, bool, str)   # settings, name, loaded, notes
 
-    def __init__(self) -> None:
+    def __init__(self, tuning=None) -> None:
         super().__init__()
+        from espec_burnin.core.run_controller import RunTuning
+
+        self.tuning = tuning or RunTuning()
         self._elapsed: list[float] = []
         self._temps: list[float] = []
 
@@ -114,12 +117,19 @@ class CapabilityPage(QWidget):
         self.notes.setPlaceholderText("e.g. 12 boards on the middle shelf, 2 cables through the left port")
         f.addWidget(field_row("What is in it", self.notes))
 
-        self.cold_target = spin(-25, -80, 20, decimals=0, suffix=" °C")
-        self.hot_target = spin(85, 20, 200, decimals=0, suffix=" °C")
-        f.addWidget(field_row("Cool down towards", self.cold_target,
-                              "Aim a little beyond your recipe, so the test finds "
-                              "the real limit rather than stopping at your target."))
-        f.addWidget(field_row("Heat up towards", self.hot_target))
+        # Bounded by the safety clamp: measuring the chamber is still driving
+        # the chamber, so it cannot command what a run is forbidden to.
+        low = self.tuning.absolute_min_c
+        high = self.tuning.absolute_max_c
+        self.cold_target = spin(low, low, 20, decimals=0, suffix=" °C")
+        self.hot_target = spin(high, 20, high, decimals=0, suffix=" °C")
+        f.addWidget(field_row(
+            "Cool down towards", self.cold_target,
+            f"Aim a little beyond your recipe so the test finds the real limit. "
+            f"Limited to {low:g} °C by the safety limits in Settings."))
+        f.addWidget(field_row(
+            "Heat up towards", self.hot_target,
+            f"Limited to {high:g} °C by the safety limits in Settings."))
         layout.addWidget(form)
 
         layout.addWidget(subtitle(
@@ -143,6 +153,8 @@ class CapabilityPage(QWidget):
         settings = CapabilitySettings(
             cold_target_c=self.cold_target.value(),
             hot_target_c=self.hot_target.value(),
+            absolute_min_c=self.tuning.absolute_min_c,
+            absolute_max_c=self.tuning.absolute_max_c,
         )
         self.start_requested.emit(
             settings, self.name.text().strip() or "Chamber",

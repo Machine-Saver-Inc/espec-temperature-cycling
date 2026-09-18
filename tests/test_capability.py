@@ -131,3 +131,80 @@ def test_an_unmeasured_direction_says_so_rather_than_guessing():
     profile = ChamberProfile(cooling_rates={"2.5": 1.0})
     assert profile.minutes_to_traverse(-20.0, 80.0) is None
     assert profile.rate_at(0.0, Direction.HEATING) is None
+
+
+# --- issue #1: the capability test drove past the safety clamp --------------
+# The setup screen offered -40 degC and +105 degC while the run clamp was
+# -25/+85, and the test wrote setpoints straight to the driver, so measuring
+# the chamber was a way around the limits every run obeys.
+
+class RecordingDriver:
+    """Captures every setpoint commanded, so the clamp can be asserted."""
+
+    def __init__(self, temperature: float = 25.0) -> None:
+        self.temperature = temperature
+        self.commanded: list[float] = []
+
+    def read_temperature(self, retries: int | None = None) -> float:
+        return self.temperature
+
+    def write_setpoint(self, celsius: float, retries: int | None = None) -> None:
+        self.commanded.append(celsius)
+
+
+def test_the_measurement_never_commands_past_the_safety_clamp():
+    driver = RecordingDriver()
+    settings = CapabilitySettings(
+        cold_target_c=-40.0, hot_target_c=105.0,     # what the user typed
+        absolute_min_c=-25.0, absolute_max_c=85.0,   # what the limits allow
+        sample_interval_s=1.0, plateau_minutes=0.05, slope_window_s=2.0,
+        timeout_minutes=1.0,
+    )
+
+    class Clock:
+        now = 0.0
+
+        def __call__(self):
+            return self.now
+
+        def sleep(self, _s):
+            self.now += 30.0
+
+    clock = Clock()
+    CapabilityTest(driver, "clamped", settings, clock=clock, sleep=clock.sleep).run()
+
+    assert driver.commanded, "the test commanded nothing at all"
+    assert min(driver.commanded) >= -25.0, f"commanded {min(driver.commanded)} degC"
+    assert max(driver.commanded) <= 85.0, f"commanded {max(driver.commanded)} degC"
+    assert -40.0 not in driver.commanded
+    assert 105.0 not in driver.commanded
+
+
+def test_the_clamp_is_reported_so_the_confirmation_can_be_honest():
+    settings = CapabilitySettings(
+        cold_target_c=-40.0, hot_target_c=105.0,
+        absolute_min_c=-25.0, absolute_max_c=85.0,
+    )
+    assert settings.cold_target_clamped == -25.0
+    assert settings.hot_target_clamped == 85.0
+    assert settings.targets_were_limited
+
+
+def test_targets_inside_the_limits_are_left_alone():
+    settings = CapabilitySettings(
+        cold_target_c=-20.0, hot_target_c=80.0,
+        absolute_min_c=-25.0, absolute_max_c=85.0,
+    )
+    assert settings.cold_target_clamped == -20.0
+    assert settings.hot_target_clamped == 80.0
+    assert not settings.targets_were_limited
+
+
+def test_widening_the_limits_widens_what_the_measurement_may_command():
+    """The clamp is the control, not a hard-coded ceiling."""
+    settings = CapabilitySettings(
+        cold_target_c=-40.0, hot_target_c=105.0,
+        absolute_min_c=-45.0, absolute_max_c=110.0,
+    )
+    assert settings.cold_target_clamped == -40.0
+    assert settings.hot_target_clamped == 105.0
