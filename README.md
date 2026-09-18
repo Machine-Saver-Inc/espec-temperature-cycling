@@ -143,11 +143,22 @@ Everything for one run lands in `Documents/Espec Burn-In/<batch> <date>/`:
 
 ## Measuring what the chamber can actually do
 
-![The measured chamber profile](docs/images/capability.png)
-
 Whether the chamber can follow a commanded ramp depends on the load and on how
 much heat leaks through the cable entry ports. **Measure the chamber's speed**
 drives it to each extreme and records how fast it actually moved, in 5 °C bands.
+
+![Setting up a chamber speed test](docs/images/chamber-setup.png)
+
+A measurement belongs to a **chamber**, identified by its model and serial
+number the way it is identified on the floor. Tests hang underneath: one
+chamber can hold *Loaded — 12 boards* and *Empty, ports closed* side by side,
+and the tests already saved for that chamber are listed as you set a new one up.
+
+Both fields remember what you have used before, and if you connect through the
+same USB adapter as last time the chamber is recognised without typing anything.
+Runs record the chamber too, so a report says which one it came from.
+
+![The measured chamber profile](docs/images/capability.png)
 
 - **Speed is not constant.** A chamber that pulls down at 2.8 °C/min near +75
   may manage 0.3 °C/min over the last few degrees to −20, so most of the time is

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from espec_burnin import APP_NAME, __version__
 from espec_burnin.core.capability import CapabilityTest
+from espec_burnin.core.chambers import find_by_adapter, save_chamber
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.core.recorder import Recorder, results_root
 from espec_burnin.core.run_controller import RunController, RunState
@@ -280,12 +281,17 @@ class MainWindow(QMainWindow):
     def _launch(self, recipe, batch, operator, resume_elapsed=0.0, resume_offset=0.0) -> None:
         try:
             self.driver = WatlowF4(self.port.device, self.connection)
+            chamber = self._current_chamber()
             self.recorder = Recorder(
                 batch=batch,
                 operator=operator,
                 recipe=recipe,
                 port=self.port.device,
                 adapter_serial=self.port.serial_number,
+                chamber_model=(chamber.model if chamber
+                               else self.settings.get("chamber_model", "")),
+                chamber_serial=(chamber.serial if chamber
+                                else self.settings.get("chamber_serial", "")),
             )
         except ChamberError as exc:
             box = QMessageBox(self)
@@ -540,7 +546,7 @@ class MainWindow(QMainWindow):
         self.settings["tuning"] = tuning.to_dict()
         settings_mod.save(self.settings)
         self.connect_page.settings = connection
-        self.recipe_page.reload_profiles()
+        self._reload_recipe_profiles()
         self.stack.setCurrentIndex(HOME)
         self._reconnect_remembered_adapter()
 
@@ -555,10 +561,18 @@ class MainWindow(QMainWindow):
         if self.port is None:
             self.stack.setCurrentIndex(CONNECT)
             return
+        self.capability_page.set_chamber(self._current_chamber())
         self.capability_page.reset()
         self.stack.setCurrentIndex(CAPABILITY)
 
-    def _start_capability(self, settings, name, loaded, notes) -> None:
+    def _current_chamber(self):
+        """Which chamber the connected adapter belongs to, if we know."""
+        adapter = self.port.serial_number if self.port else None
+        return find_by_adapter(adapter) or find_by_adapter(
+            self.settings.get("adapter_serial")
+        )
+
+    def _start_capability(self, settings, chamber, name, loaded, notes) -> None:
         if self.port is None:
             self.stack.setCurrentIndex(CONNECT)
             return
@@ -579,8 +593,20 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(CONNECT)
             return
 
+        # Remember which adapter this chamber was reached through, so plugging
+        # it in next time recognises the chamber without anyone typing.
+        if self.port is not None:
+            chamber.adapter_serial = self.port.serial_number
+            chamber.last_port = self.port.device
+            save_chamber(chamber)
+        self.settings["chamber_model"] = chamber.model
+        self.settings["chamber_serial"] = chamber.serial
+        settings_mod.save(self.settings)
+
         test = CapabilityTest(
-            self.capability_driver, name, settings, loaded=loaded, load_notes=notes
+            self.capability_driver, name, settings,
+            chamber_model=chamber.model, chamber_serial=chamber.serial,
+            loaded=loaded, load_notes=notes,
         )
         self.capability_worker = CapabilityWorker(test)
         self.capability_worker.progress.connect(
@@ -612,7 +638,7 @@ class MainWindow(QMainWindow):
         self.capability_page.show_result(profile)
 
     def _capability_finished(self, profile) -> None:
-        self.recipe_page.reload_profiles()
+        self._reload_recipe_profiles()
         self.stack.setCurrentIndex(HOME)
 
     def _open_results_folder(self) -> None:

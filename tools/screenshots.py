@@ -98,7 +98,10 @@ def main() -> int:
 
     with mock.patch("espec_burnin.hardware.ports.list_serial_ports",
                     return_value=FAKE_PORTS), \
-         mock.patch("espec_burnin.core.capability.profiles_dir", return_value=tmp):
+         mock.patch("espec_burnin.core.capability.profiles_dir",
+                    return_value=tmp / "profiles"), \
+         mock.patch("espec_burnin.core.chambers.chambers_path",
+                    return_value=tmp / "chambers.json"):
 
         home = HomePage()
         home.set_connection(
@@ -146,11 +149,29 @@ def main() -> int:
                     (35, 2.7), (45, 2.5), (55, 2.2), (65, 1.8), (75, 1.2)]}
         capability = CapabilityPage()
         capability.show_result(ChamberProfile(
+            chamber_model="Espec BTZ-133", chamber_serial="0612223",
             name="Loaded — 12 boards, 2 cables through the left port",
             loaded=True, cooling_rates=cooling, heating_rates=heating,
             reachable_min_c=-17.5, reachable_max_c=82.0,
         ))
         shoot(capability, "capability")
+
+        # The setup screen: the chamber is the identity, tests hang under it.
+        from espec_burnin.core.capability import save_profile
+        from espec_burnin.core.chambers import Chamber, save_chamber
+
+        save_chamber(Chamber(model="Espec BTZ-133", serial="0612223",
+                             adapter_serial="AB0KX1QZ"))
+        for test_name, is_loaded in [("Loaded \u2014 12 boards", True),
+                                     ("Empty, ports closed", False)]:
+            save_profile(ChamberProfile(
+                chamber_model="Espec BTZ-133", chamber_serial="0612223",
+                name=test_name, loaded=is_loaded,
+                reachable_min_c=-17.5, reachable_max_c=82.0))
+        setup = CapabilityPage()
+        setup.set_chamber(Chamber(model="Espec BTZ-133", serial="0612223",
+                                  adapter_serial="AB0KX1QZ"))
+        shoot(setup, "chamber-setup", height=900)
 
     print(f"\nDone. {len(list(OUT.glob('*.png')))} images in {OUT.relative_to(ROOT)}")
     return 0

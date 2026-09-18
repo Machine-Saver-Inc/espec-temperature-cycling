@@ -109,6 +109,9 @@ def render_report(recorder, *, status: str, elapsed_s: float) -> str:
     r = recorder.recipe
     e = html.escape
     verdict = recorder.verdict(status)
+    chamber = (f"{recorder.chamber_model} — Serial {recorder.chamber_serial}"
+               if recorder.chamber_model and recorder.chamber_serial
+               else "Chamber not recorded")
     failed = "completed within tolerance" not in verdict
 
     tolerance_pct = (
@@ -137,7 +140,8 @@ def render_report(recorder, *, status: str, elapsed_s: float) -> str:
 <style>{_CSS}</style></head>
 <body><div class="wrap">
 <h1>Burn-in report — {e(recorder.batch)}</h1>
-<div class="meta">Operator {e(recorder.operator or "not recorded")} ·
+<div class="meta">{e(chamber)} ·
+ operator {e(recorder.operator or "not recorded")} ·
  started {recorder.started_at.strftime('%A %d %B %Y, %H:%M')} ·
  port {e(recorder.port)}</div>
 <div class="verdict{' bad' if failed else ''}">{e(verdict)}</div>

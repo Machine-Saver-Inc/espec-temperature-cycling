@@ -52,9 +52,15 @@ class Direction(str, Enum):
 
 @dataclass
 class ChamberProfile:
-    """What one chamber, loaded one way, can actually do."""
+    """What one chamber, set up one way, can actually do.
 
-    name: str = "Chamber"
+    The chamber's model and serial are the identity; ``name`` is the name of
+    this particular test against it, so one chamber can hold several.
+    """
+
+    chamber_model: str = ""
+    chamber_serial: str = ""
+    name: str = "Test"
     loaded: bool = True
     load_notes: str = ""
     measured_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -127,6 +133,19 @@ class ChamberProfile:
             return False
         return True
 
+    # -- identity -------------------------------------------------------------
+    @property
+    def chamber_label(self) -> str:
+        from espec_burnin.core.chambers import Chamber
+
+        return Chamber(model=self.chamber_model, serial=self.chamber_serial).label
+
+    @property
+    def chamber_key(self) -> str:
+        from espec_burnin.core.chambers import Chamber
+
+        return Chamber(model=self.chamber_model, serial=self.chamber_serial).key
+
     # -- persistence ---------------------------------------------------------
     def to_dict(self) -> dict:
         return asdict(self)
@@ -142,25 +161,47 @@ def profiles_dir() -> Path:
 
 
 def save_profile(profile: ChamberProfile) -> Path:
-    folder = profiles_dir()
+    """Store a test under its chamber, so one chamber can hold several."""
+    from espec_burnin.core.chambers import slug
+
+    folder = profiles_dir() / profile.chamber_key
     folder.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c for c in profile.name if c.isalnum() or c in " _-").strip() or "chamber"
-    path = folder / f"{safe}.json"
+    path = folder / f"{slug(profile.name)}.json"
     path.write_text(json.dumps(profile.to_dict(), indent=2), encoding="utf-8")
     return path
 
 
 def load_profiles() -> list[ChamberProfile]:
+    """Every saved test, newest first.
+
+    rglob also reads the flat layout written before profiles belonged to a
+    chamber, so measurements taken with an earlier version are not lost.
+    """
     folder = profiles_dir()
     if not folder.is_dir():
         return []
     out = []
-    for path in sorted(folder.glob("*.json")):
+    for path in sorted(folder.rglob("*.json")):
         try:
             out.append(ChamberProfile.from_dict(json.loads(path.read_text(encoding="utf-8"))))
         except (OSError, ValueError):
             continue
-    return out
+    return sorted(out, key=lambda p: p.measured_at, reverse=True)
+
+
+def load_profiles_for(model: str, serial: str) -> list[ChamberProfile]:
+    """The tests run against one chamber, newest first."""
+    from espec_burnin.core.chambers import Chamber
+
+    wanted = Chamber(model=model, serial=serial).key
+    return [p for p in load_profiles() if p.chamber_key == wanted]
+
+
+def best_profile_for(model: str, serial: str) -> ChamberProfile | None:
+    """The test to check a recipe against: a loaded one over an empty one."""
+    profiles = [p for p in load_profiles_for(model, serial) if not p.aborted]
+    loaded = [p for p in profiles if p.loaded]
+    return (loaded or profiles or [None])[0]
 
 
 @dataclass
@@ -223,6 +264,8 @@ class CapabilityTest:
         profile_name: str,
         settings: CapabilitySettings | None = None,
         *,
+        chamber_model: str = "",
+        chamber_serial: str = "",
         loaded: bool = True,
         load_notes: str = "",
         on_progress: Callable[[CapabilityProgress], None] | None = None,
@@ -232,7 +275,11 @@ class CapabilityTest:
         self.driver = driver
         self.settings = settings or CapabilitySettings()
         self.profile = ChamberProfile(
-            name=profile_name, loaded=loaded, load_notes=load_notes
+            chamber_model=chamber_model,
+            chamber_serial=chamber_serial,
+            name=profile_name,
+            loaded=loaded,
+            load_notes=load_notes,
         )
         self.on_progress = on_progress or (lambda progress: None)
         self.clock = clock

@@ -20,7 +20,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from espec_burnin.core.capability import ChamberProfile, load_profiles
+from espec_burnin.core.capability import (
+    ChamberProfile,
+    best_profile_for,
+    load_profiles,
+)
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.hardware import ports as ports_mod
 from espec_burnin.hardware.errors import ChamberError
@@ -463,12 +467,18 @@ class RecipePage(QWidget):
         self.reload_profiles()
         self._update_summary()
 
-    def reload_profiles(self) -> None:
-        """Prefer a loaded profile: the empty chamber is the best case, not
-        the case the boards will actually see."""
-        profiles = load_profiles()
-        loaded = [p for p in profiles if p.loaded]
-        self._profile = (loaded or profiles or [None])[0]
+    def reload_profiles(self, model: str = "", serial: str = "") -> None:
+        """Use the measurement for the chamber actually in front of the user.
+
+        A loaded test is preferred over an empty one: the empty chamber is the
+        best case, not the case the boards will see.
+        """
+        if model and serial:
+            self._profile = best_profile_for(model, serial)
+        else:
+            profiles = [p for p in load_profiles() if not p.aborted]
+            loaded = [p for p in profiles if p.loaded]
+            self._profile = (loaded or profiles or [None])[0]
         self._update_summary()
 
     def _apply_measured(self) -> None:
@@ -519,7 +529,8 @@ class RecipePage(QWidget):
             return
 
         self.capability_note.setText(
-            f"<b>Measured against \u201c{profile.name}\u201d:</b> "
+            f"<b>{profile.chamber_label} \u2014 measured in "
+            f"\u201c{profile.name}\u201d:</b> "
             + "; ".join(problems)
             + ". A ramp the chamber cannot follow becomes a step change, and the "
             "recorded profile stops meaning anything."

@@ -67,6 +67,8 @@ class Recorder:
     recipe: Recipe
     port: str
     adapter_serial: str | None = None
+    chamber_model: str = ""
+    chamber_serial: str = ""
     started_at: datetime = field(default_factory=datetime.now)
 
     folder: Path = field(init=False)
@@ -135,6 +137,8 @@ class Recorder:
             "operator": self.operator,
             "port": self.port,
             "adapter_serial": self.adapter_serial,
+            "chamber_model": self.chamber_model,
+            "chamber_serial": self.chamber_serial,
             "started_at": self.started_at.isoformat(timespec="seconds"),
             "status": status,
             "elapsed_s": round(elapsed_s, 1),

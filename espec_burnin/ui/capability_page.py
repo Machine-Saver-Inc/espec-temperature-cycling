@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -27,10 +28,26 @@ from espec_burnin.core.capability import (
     CapabilityTest,
     ChamberProfile,
     Direction,
+    load_profiles_for,
     save_profile,
 )
+from espec_burnin.core.chambers import (
+    Chamber,
+    known_models,
+    save_chamber,
+    serials_for_model,
+)
 from espec_burnin.core.profile import format_duration
-from espec_burnin.ui.widgets import check, field_row, primary, spin, subtitle, title
+from espec_burnin.ui.widgets import (
+    Collapsible,
+    check,
+    editable_choice,
+    field_row,
+    primary,
+    spin,
+    subtitle,
+    title,
+)
 
 SETUP, RUNNING, RESULT = range(3)
 
@@ -56,13 +73,14 @@ class CapabilityPage(QWidget):
 
     finished = Signal(object)    # ChamberProfile or None
     back = Signal()
-    start_requested = Signal(object, str, bool, str)   # settings, name, loaded, notes
+    start_requested = Signal(object, object, str, bool, str)  # settings, Chamber, test name, loaded, notes
 
     def __init__(self, tuning=None) -> None:
         super().__init__()
         from espec_burnin.core.run_controller import RunTuning
 
         self.tuning = tuning or RunTuning()
+        self._chamber = Chamber()
         self._elapsed: list[float] = []
         self._temps: list[float] = []
 
@@ -103,20 +121,53 @@ class CapabilityPage(QWidget):
         form = QWidget()
         f = QVBoxLayout(form)
         f.setContentsMargins(0, 10, 0, 0)
-        f.setSpacing(8)
+        f.setSpacing(10)
 
-        self.name = QLineEdit("Loaded — boards and cables")
-        f.addWidget(field_row("Profile name", self.name,
-                              "How this setup will be listed, e.g. 'Loaded — 12 "
-                              "boards' or 'Empty, ports closed'."))
+        # --- which chamber. This is the identity everything hangs off. -----
+        chamber_box = Collapsible("Chamber", expanded=True)
+        self.model = editable_choice(known_models(), placeholder="e.g. Espec BTZ-133")
+        self.model.currentTextChanged.connect(self._model_changed)
+        chamber_box.add(field_row(
+            "Model", self.model,
+            "The chamber this test describes. Pick one you have used before, or "
+            "type a new one."))
+
+        self.serial = editable_choice([], placeholder="e.g. 0612223")
+        self.serial.currentTextChanged.connect(self._chamber_changed)
+        chamber_box.add(field_row("Serial number", self.serial))
+
+        self.recognised = QLabel("")
+        self.recognised.setObjectName("StatusGood")
+        self.recognised.setWordWrap(True)
+        chamber_box.add(self.recognised)
+        f.addWidget(chamber_box)
+
+        # --- which test on that chamber -------------------------------------
+        self.test_box = Collapsible("Test", expanded=True)
+        self.name = editable_choice([], placeholder="e.g. Loaded \u2014 12 boards")
+        self.test_box.add(field_row(
+            "Test name", self.name,
+            "Name this setup. Re-using a name replaces that saved test."))
 
         self.loaded = check("The chamber is loaded as it will be for a real run", True)
-        f.addWidget(field_row("Setup", self.loaded))
+        self.test_box.add(field_row("Setup", self.loaded))
 
         self.notes = QLineEdit()
-        self.notes.setPlaceholderText("e.g. 12 boards on the middle shelf, 2 cables through the left port")
-        f.addWidget(field_row("What is in it", self.notes))
+        self.notes.setPlaceholderText(
+            "e.g. 12 boards on the middle shelf, 2 cables through the left port")
+        self.test_box.add(field_row("What is in it", self.notes))
 
+        self.previous_label = QLabel("Tests already saved for this chamber")
+        self.previous_label.setObjectName("Hint")
+        self.test_box.add(self.previous_label)
+
+        self.previous = QListWidget()
+        self.previous.setMaximumHeight(120)
+        self.previous.itemSelectionChanged.connect(self._previous_selected)
+        self.test_box.add(self.previous)
+        f.addWidget(self.test_box)
+
+        # --- how far to drive it --------------------------------------------
         # Bounded by the safety clamp: measuring the chamber is still driving
         # the chamber, so it cannot command what a run is forbidden to.
         low = self.tuning.absolute_min_c
@@ -149,15 +200,91 @@ class CapabilityPage(QWidget):
         layout.addLayout(buttons)
         return page
 
+    # -- chamber and test bookkeeping ----------------------------------------
+    def set_chamber(self, chamber: Chamber | None) -> None:
+        """Pre-fill from the chamber recognised on the connected adapter."""
+        self._chamber = chamber or Chamber()
+        if self._chamber.is_named:
+            self.model.setCurrentText(self._chamber.model)
+            self.serial.setCurrentText(self._chamber.serial)
+            self.recognised.setText(
+                f"Recognised from the adapter you are connected through: "
+                f"{self._chamber.label}.")
+        else:
+            self.recognised.setText("")
+        self._refresh_previous()
+
+    def _model_changed(self, model: str) -> None:
+        known = serials_for_model(model)
+        current = self.serial.currentText()
+        self.serial.blockSignals(True)
+        self.serial.clear()
+        self.serial.addItems(known)
+        self.serial.setCurrentText(current if current in known else current)
+        self.serial.blockSignals(False)
+        self._chamber_changed()
+
+    def _chamber_changed(self, *_args) -> None:
+        self._refresh_previous()
+
+    def chamber(self) -> Chamber:
+        return Chamber(
+            model=self.model.currentText().strip(),
+            serial=self.serial.currentText().strip(),
+            adapter_serial=self._chamber.adapter_serial,
+            last_port=self._chamber.last_port,
+        )
+
+    def _refresh_previous(self) -> None:
+        chamber = self.chamber()
+        self.previous.clear()
+        names = []
+        if chamber.is_named:
+            for profile in load_profiles_for(chamber.model, chamber.serial):
+                names.append(profile.name)
+                reached = ""
+                if profile.reachable_min_c is not None and profile.reachable_max_c is not None:
+                    reached = (f"  \u00b7  reached {profile.reachable_min_c:.0f} to "
+                               f"{profile.reachable_max_c:.0f} °C")
+                when = profile.measured_at.replace("T", " ")[:16]
+                self.previous.addItem(f"{profile.name}  \u00b7  {when}{reached}")
+
+        self.previous_label.setText(
+            f"Tests already saved for {chamber.label}" if names
+            else "No tests saved for this chamber yet")
+        current = self.name.currentText()
+        self.name.blockSignals(True)
+        self.name.clear()
+        self.name.addItems(names)
+        self.name.setCurrentText(current)
+        self.name.blockSignals(False)
+
+    def _previous_selected(self) -> None:
+        item = self.previous.currentItem()
+        if item:
+            self.name.setCurrentText(item.text().split("  \u00b7  ")[0])
+
     def _emit_start(self) -> None:
+        chamber = self.chamber()
+        if not chamber.is_named:
+            QMessageBox.information(
+                self, "Which chamber is this?",
+                "Enter the chamber's model and serial number first. The "
+                "measurement is saved against that chamber so it can be found "
+                "again, and so a recipe is checked against the right one.",
+            )
+            return
+
         settings = CapabilitySettings(
             cold_target_c=self.cold_target.value(),
             hot_target_c=self.hot_target.value(),
             absolute_min_c=self.tuning.absolute_min_c,
             absolute_max_c=self.tuning.absolute_max_c,
         )
+        save_chamber(chamber)
         self.start_requested.emit(
-            settings, self.name.text().strip() or "Chamber",
+            settings, chamber,
+            self.name.currentText().strip() or "Test",
             self.loaded.isChecked(), self.notes.text().strip(),
         )
 

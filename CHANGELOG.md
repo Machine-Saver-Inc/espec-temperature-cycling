@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.7.0]
+
+### Changed
+- **A chamber is now the thing measurements belong to (#1).** The speed test
+  is identified by the chamber's model and serial number, the way the floor
+  identifies it, with the test's own name as a second section underneath. One
+  chamber holds as many named tests as you like, and the tests already saved
+  for it are listed while you set a new one up.
+- Model and serial remember what has been used before and offer it back;
+  connecting through the same USB adapter recognises the chamber with no
+  typing, because the adapter's serial number is already how a port is
+  remembered.
+- A recipe is checked against a measurement of *that* chamber rather than
+  whichever profile happened to be saved first.
+- Runs record the chamber they ran on, in `run.json` and at the top of the
+  report.
+
+### Compatibility
+- Profiles saved by 0.3.0 to 0.6.0 are still read; they simply have no chamber
+  against them until they are measured again.
+
+
 ## [0.6.0]
 
 ### Fixed

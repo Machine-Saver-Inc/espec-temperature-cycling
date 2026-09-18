@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -89,3 +91,50 @@ def check(text: str, value: bool) -> QCheckBox:
     box = QCheckBox(text)
     box.setChecked(bool(value))
     return box
+
+
+def editable_choice(options: list[str], current: str = "",
+                    placeholder: str = "") -> QComboBox:
+    """A combo you can also type into — pick a known value or enter a new one."""
+    box = QComboBox()
+    box.setEditable(True)
+    box.setInsertPolicy(QComboBox.NoInsert)
+    box.addItems([o for o in options if o])
+    if placeholder:
+        box.lineEdit().setPlaceholderText(placeholder)
+    box.setCurrentText(current)
+    return box
+
+
+class Collapsible(QWidget):
+    """A section that folds away, with a disclosure triangle."""
+
+    def __init__(self, title: str, expanded: bool = True) -> None:
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        self.toggle = QToolButton()
+        self.toggle.setText(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setChecked(expanded)
+        self.toggle.setStyleSheet("QToolButton { border: none; font-weight: 600; }")
+        self.toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self.toggle.toggled.connect(self._on_toggled)
+        outer.addWidget(self.toggle, alignment=Qt.AlignLeft)
+
+        self.body = QWidget()
+        self.body.setVisible(expanded)
+        self.content = QVBoxLayout(self.body)
+        self.content.setContentsMargins(16, 0, 0, 0)
+        self.content.setSpacing(8)
+        outer.addWidget(self.body)
+
+    def _on_toggled(self, checked: bool) -> None:
+        self.body.setVisible(checked)
+        self.toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+
+    def add(self, widget: QWidget) -> None:
+        self.content.addWidget(widget)
