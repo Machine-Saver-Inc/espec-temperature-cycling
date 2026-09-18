@@ -184,7 +184,12 @@ def test_appimage_is_replaced_in_place(monkeypatch, tmp_path):
     result = apply_update(new)
     assert result.outcome is Applied.RESTARTING
     assert current.read_bytes() == PAYLOAD          # swapped
-    assert current.stat().st_mode & 0o111           # still executable
+
+    # Windows has no execute bit: os.stat() only reports one for names ending
+    # .exe/.bat/.cmd/.com, and chmod there toggles read-only and nothing else.
+    # The swap is what matters on every platform; the mode check is POSIX only.
+    if sys.platform != "win32":
+        assert current.stat().st_mode & 0o111
 
 
 def test_a_deb_tells_the_user_the_command_rather_than_seeking_root(tmp_path):
