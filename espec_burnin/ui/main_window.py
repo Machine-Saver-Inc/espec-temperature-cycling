@@ -6,7 +6,7 @@ import logging
 import webbrowser
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -32,6 +32,7 @@ from espec_burnin.ui import settings as settings_mod
 from espec_burnin.ui.capability_page import CapabilityPage, CapabilityWorker
 from espec_burnin.ui.keepawake import KeepAwake
 from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_error
+from espec_burnin.ui.report_dialog import ReportDialog, report_icon
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
 from espec_burnin.update.checker import (
@@ -169,6 +170,26 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         outer.addWidget(self.stack, 1)
+
+        # Bottom left on every screen: reporting a problem should never mean
+        # hunting for where to report it.
+        footer = QHBoxLayout()
+        footer.setContentsMargins(14, 6, 14, 10)
+        self.report_button = QPushButton("  Report a problem")
+        self.report_button.setObjectName("Report")
+        self.report_button.setIcon(
+            report_icon(self.palette().windowText().color().name())
+        )
+        self.report_button.setIconSize(QSize(20, 20))
+        self.report_button.setToolTip(
+            "Report a bug or suggest an improvement, with the program's current "
+            "state filled in for you"
+        )
+        self.report_button.clicked.connect(self._report_problem)
+        footer.addWidget(self.report_button)
+        footer.addStretch(1)
+        outer.addLayout(footer)
+
         self.setCentralWidget(container)
 
         self.home = HomePage()
@@ -655,6 +676,86 @@ class MainWindow(QMainWindow):
     def _capability_finished(self, profile) -> None:
         self._reload_recipe_profiles()
         self.stack.setCurrentIndex(HOME)
+
+    # -- reporting -----------------------------------------------------------
+    SCREEN_NAMES = {
+        HOME: "Home",
+        CONNECT: "Connect to the chamber",
+        RECIPE: "Choose the test",
+        RUN: "Running a burn-in",
+        SETTINGS: "Settings",
+        CAPABILITY: "Measure the chamber's speed",
+    }
+
+    def _report_context(self) -> dict:
+        """The facts that actually shorten a diagnosis."""
+        context: dict[str, str] = {
+            "Screen open": self.SCREEN_NAMES.get(self.stack.currentIndex(), "?"),
+        }
+
+        chamber = self._current_chamber()
+        if chamber is not None:
+            context["Chamber"] = chamber.label
+        elif self.settings.get("chamber_model"):
+            context["Chamber"] = (f"{self.settings.get('chamber_model')} \u2014 "
+                                  f"Serial {self.settings.get('chamber_serial')}")
+
+        if self.port is not None:
+            context["Port"] = self.port.device
+            context["Adapter"] = self.port.description
+        else:
+            context["Port"] = "not connected"
+
+        connection = self.connection
+        context["Controller settings"] = (
+            f"address {connection.slave_address}, {connection.baudrate} baud, "
+            f"{connection.bytesize}{connection.parity[0]}{connection.stopbits}, "
+            f"timeout {connection.timeout_s}s, {connection.retries} retries, "
+            f"write function {connection.write_functioncode}"
+        )
+        context["Safety limits"] = (
+            f"{self.tuning.absolute_min_c:g} to {self.tuning.absolute_max_c:g} \u00b0C"
+        )
+
+        running = self.worker is not None and self.worker.isRunning()
+        context["Run in progress"] = "yes" if running else "no"
+        if running and self.recorder is not None:
+            recipe = self.recorder.recipe
+            context["Batch"] = self.recorder.batch
+            context["Recipe"] = (
+                f"{recipe.cycles} cycles, {recipe.cold_c:g} to {recipe.hot_c:g} \u00b0C, "
+                f"cool {recipe.ramp_down_minutes:g} min / heat {recipe.ramp_up_minutes:g} min, "
+                f"hold {recipe.cold_dwell_minutes:g}/{recipe.hot_dwell_minutes:g} min"
+            )
+            context["Guaranteed soak"] = "on" if recipe.guaranteed_soak else "off"
+            if self.recorder.samples:
+                last = self.recorder.samples[-1]
+                # Bound outside the f-string: an escape inside an f-string
+                # expression needs Python 3.12 and this targets 3.10.
+                measured = "\u2014" if last.measured_c is None else f"{last.measured_c:g}"
+                context["Last sample"] = (
+                    f"cycle {last.cycle}, {last.phase.value}, "
+                    f"setpoint {last.setpoint_c:g} \u00b0C, "
+                    f"measured {measured} \u00b0C"
+                )
+            context["Results folder"] = str(self.recorder.folder)
+
+        measuring = (self.capability_worker is not None
+                     and self.capability_worker.isRunning())
+        context["Speed test in progress"] = "yes" if measuring else "no"
+
+        context["Last update check"] = (
+            "failed" if self.settings.get("last_update_check_failed")
+            else self.settings.get("last_update_check") or "never"
+        )
+        return context
+
+    def _report_problem(self) -> None:
+        try:
+            context = self._report_context()
+        except Exception as exc:  # noqa: BLE001 - a report must always open
+            context = {"Could not gather state": str(exc)}
+        ReportDialog(context, self).exec()
 
     def _open_results_folder(self) -> None:
         folder = results_root()

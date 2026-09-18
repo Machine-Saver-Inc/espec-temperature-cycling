@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.9.0]
+
+### Added
+- **Report a problem**, bottom-left on every screen, with a journal-and-bug
+  icon. It gathers the version, the screen that was open, the chamber and port,
+  the controller settings and safety limits, what a run was doing at the time,
+  and the last lines of the log, then opens a GitHub issue with all of it filled
+  in. Bug and improvement produce different templates and different labels.
+- The whole report is shown before anything is sent and copied to the clipboard
+  as well, so it survives a browser that will not open or a log too long for the
+  address bar.
+- Paths under the user's home folder are shortened to `~` before a report is
+  shown or posted, since the repository is public.
+
+### Fixed
+- CI now also runs on Python 3.10, which `pyproject.toml` has always claimed to
+  support. A backslash inside an f-string expression — valid only from 3.12 —
+  had already slipped in.
+
+### Added (testing)
+- Smoke tests that build every screen and the report dialog. They immediately
+  caught a null icon: `QIcon` takes a pixmap, not a `QImage`, and the button
+  would have shipped with no icon and no error.
+
+
 ## [0.8.0]
 
 ### Added

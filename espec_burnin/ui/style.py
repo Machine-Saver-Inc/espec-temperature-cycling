@@ -24,6 +24,11 @@ QPushButton#Primary {{
 QPushButton#Primary:hover {{ background: #2560d0; }}
 QPushButton#Primary:disabled {{ background: palette(mid); color: palette(window); }}
 QPushButton#Danger {{ color: {BAD}; }}
+QPushButton#Report {{
+    padding: 6px 12px; border: 1px solid palette(mid); border-radius: 6px;
+    color: palette(text);
+}}
+QPushButton#Report:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}
 QFrame#Card {{
     border: 1px solid palette(mid); border-radius: 9px; background: palette(base);
 }}

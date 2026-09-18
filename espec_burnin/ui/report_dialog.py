@@ -1,0 +1,167 @@
+"""The report-a-problem dialog.
+
+Shows exactly what will be posted before anything leaves the machine, because
+the repository is public and the report carries details of this computer.
+"""
+
+from __future__ import annotations
+
+import logging
+import webbrowser
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QDialog,
+    QDialogButtonBox,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from espec_burnin.core.diagnostics import Report, issue_url, read_log_tail
+
+log = logging.getLogger(__name__)
+
+ICON_PATH = Path(__file__).resolve().parent.parent / "resources" / "report-icon.svg"
+
+
+def report_icon(colour: str = "#1a1a1a", size: int = 20) -> QIcon:
+    """The journal-and-bug mark, drawn in a colour that suits the palette."""
+    try:
+        from PySide6.QtSvg import QSvgRenderer
+
+        raw = ICON_PATH.read_text(encoding="utf-8").replace("currentColor", colour)
+        renderer = QSvgRenderer(QByteArray(raw.encode("utf-8")))
+        image = QImage(size, size, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        renderer.render(painter)
+        painter.end()
+        # QIcon takes a pixmap, not an image: QIcon(QImage) yields a null icon
+        # and no error, which is how a button ships with no icon on it.
+        return QIcon(QPixmap.fromImage(image))
+    except Exception as exc:  # noqa: BLE001 - an icon is never worth failing over
+        log.warning("could not render the report icon: %s", exc)
+        return QIcon()
+
+
+class ReportDialog(QDialog):
+    """Pick bug or improvement, describe it, see what will be sent, post it."""
+
+    def __init__(self, context: dict[str, str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Report a problem or an idea")
+        self.setMinimumWidth(620)
+
+        self.report = Report(context=context, log_tail=read_log_tail())
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        heading = QLabel("What would you like to report?")
+        heading.setStyleSheet("font-size: 16px; font-weight: 600;")
+        layout.addWidget(heading)
+
+        self.bug = QRadioButton("A bug — the program did something wrong")
+        self.improvement = QRadioButton("An improvement — something would work better")
+        self.bug.setChecked(True)
+        group = QButtonGroup(self)
+        group.addButton(self.bug)
+        group.addButton(self.improvement)
+        layout.addWidget(self.bug)
+        layout.addWidget(self.improvement)
+        self.bug.toggled.connect(self._refresh)
+
+        self.summary = QLineEdit()
+        self.summary.setPlaceholderText("One line: what went wrong, or what would help")
+        self.summary.textChanged.connect(self._refresh)
+        layout.addWidget(self.summary)
+
+        self.description = QPlainTextEdit()
+        self.description.setPlaceholderText(
+            "What were you doing, and what did you see? Anything you already tried."
+        )
+        self.description.setMinimumHeight(110)
+        self.description.textChanged.connect(self._refresh)
+        layout.addWidget(self.description)
+
+        self.note = QLabel(
+            "The details below are collected automatically and go with the report. "
+            "This repository is public, so check you are happy with them — paths "
+            "under your home folder are shortened to <code>~</code>."
+        )
+        self.note.setWordWrap(True)
+        self.note.setTextFormat(Qt.RichText)
+        self.note.setObjectName("Subtitle")
+        layout.addWidget(self.note)
+
+        self.preview = QPlainTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setMinimumHeight(180)
+        layout.addWidget(self.preview, 1)
+
+        buttons = QDialogButtonBox()
+        self.post = buttons.addButton("Open GitHub to post it",
+                                      QDialogButtonBox.AcceptRole)
+        self.post.setObjectName("Primary")
+        self.copy = buttons.addButton("Copy to clipboard", QDialogButtonBox.ActionRole)
+        buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+        buttons.accepted.connect(self._post)
+        buttons.rejected.connect(self.reject)
+        self.copy.clicked.connect(self._copy)
+        layout.addWidget(buttons)
+
+        self._refresh()
+
+    # -- assembling ----------------------------------------------------------
+    def _current(self) -> Report:
+        self.report.kind = "bug" if self.bug.isChecked() else "improvement"
+        self.report.summary = self.summary.text()
+        self.report.description = self.description.toPlainText()
+        return self.report
+
+    def _refresh(self) -> None:
+        report = self._current()
+        self.preview.setPlainText(f"{report.title}\n\n{report.body()}")
+        self.post.setEnabled(bool(self.summary.text().strip()))
+
+    def _copy(self) -> None:
+        report = self._current()
+        QGuiApplication.clipboard().setText(f"{report.title}\n\n{report.body()}")
+        QMessageBox.information(
+            self, "Copied",
+            "The whole report is on your clipboard. Paste it into a new issue.",
+        )
+
+    def _post(self) -> None:
+        report = self._current()
+        url, trimmed = issue_url(report)
+
+        # On the clipboard either way: if the log had to be dropped to fit the
+        # address bar, the full text is still one paste away.
+        QGuiApplication.clipboard().setText(f"{report.title}\n\n{report.body()}")
+
+        if not webbrowser.open(url):
+            QMessageBox.warning(
+                self, "Could not open your browser",
+                "The full report is on your clipboard. Open the repository's "
+                "Issues page and paste it into a new issue.",
+            )
+            return
+
+        if trimmed:
+            QMessageBox.information(
+                self, "One thing to paste",
+                "GitHub is open with the report filled in, but it was too long "
+                "for the address bar so the log lines were left out. The full "
+                "report is on your clipboard if you want to paste it instead.",
+            )
+        self.accept()

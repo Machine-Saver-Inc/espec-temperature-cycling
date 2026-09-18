@@ -229,6 +229,24 @@ screen shows the installed version and when it last managed to check, and
 
 ---
 
+## Reporting a problem
+
+![Reporting a bug](docs/images/report.png)
+
+**Report a problem** sits in the bottom-left corner of every screen. It fills in
+a GitHub issue for you with what is usually asked for anyway: the version, which
+screen was open, how the chamber is connected, the controller settings and
+safety limits, whether a run was going and what it was doing, and the last lines
+of the log.
+
+Choose **a bug** or **an improvement** — the two produce different templates and
+land under different labels. You see the whole report before anything is sent,
+and it is copied to your clipboard as well, so nothing is lost if the browser
+does not open.
+
+Paths under your home folder are shortened to `~` before the report is shown,
+because the repository is public.
+
 ## When it will not connect
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). The same steps appear in

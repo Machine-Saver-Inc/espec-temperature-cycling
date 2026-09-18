@@ -89,7 +89,7 @@ def main() -> int:
     from espec_burnin.hardware.errors import PortBusyError
     from espec_burnin.hardware.f4 import ConnectionSettings
     from espec_burnin.ui.capability_page import CapabilityPage
-    from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage
+    from espec_burnin.ui.pages import ConnectPage, RecipePage
     from espec_burnin.ui.run_page import RunPage
     from espec_burnin.ui.settings_page import SettingsPage
 
@@ -101,14 +101,21 @@ def main() -> int:
          mock.patch("espec_burnin.core.capability.profiles_dir",
                     return_value=tmp / "profiles"), \
          mock.patch("espec_burnin.core.chambers.chambers_path",
-                    return_value=tmp / "chambers.json"):
+                    return_value=tmp / "chambers.json"), \
+         mock.patch("espec_burnin.core.recorder.results_root",
+                    return_value=tmp / "results"), \
+         mock.patch("espec_burnin.ui.settings.settings_path",
+                    return_value=tmp / "settings.json"):
 
-        home = HomePage()
-        home.set_connection(
+        # The whole window, so the footer's Report a problem button shows.
+        from espec_burnin.ui.main_window import MainWindow
+
+        window = MainWindow()
+        window.home.set_connection(
             "Chamber connected on COM3 — currently 23.6 °C.", True
         )
-        home.set_version_line(__version__, "18 Sep 2026 14:02")
-        shoot(home, "home")
+        window.home.set_version_line(__version__, "18 Sep 2026 14:02")
+        shoot(window, "home")
 
         connect = ConnectPage(ConnectionSettings())
         connect.refresh()
@@ -172,6 +179,27 @@ def main() -> int:
         setup.set_chamber(Chamber(model="Espec BTZ-133", serial="0612223",
                                   adapter_serial="AB0KX1QZ"))
         shoot(setup, "chamber-setup", height=900)
+
+        # Reporting a problem, with the program's state already filled in.
+        from espec_burnin.ui.report_dialog import ReportDialog
+
+        dialog = ReportDialog({
+            "Screen open": "Running a burn-in",
+            "Chamber": "Espec BTZ-133 — Serial 0612223",
+            "Port": "COM3",
+            "Adapter": "USB Serial Port (FTDI FT232R)",
+            "Controller settings": "address 201, 19200 baud, 8N1, timeout 0.35s, "
+                                   "3 retries, write function 16",
+            "Safety limits": "-25 to 85 °C",
+            "Run in progress": "yes",
+            "Batch": "MS-4412",
+            "Recipe": "12 cycles, -20 to 80 °C, cool 60 min / heat 60 min",
+            "Last sample": "cycle 3, ramp_down, setpoint -8 °C, measured -6.2 °C",
+        })
+        dialog.summary.setText("Chamber stalls before reaching -20 °C")
+        dialog.description.setPlainText(
+            "Cools briskly to about 0 °C, then slows and stops around -17.5 °C.")
+        shoot(dialog, "report", width=680, height=800)
 
     print(f"\nDone. {len(list(OUT.glob('*.png')))} images in {OUT.relative_to(ROOT)}")
     return 0
