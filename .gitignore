@@ -31,6 +31,9 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# ...but ours is hand-written and required to build the release. The rule above
+# is meant for specs that PyInstaller generates; this one is source.
+!packaging/espec.spec
 
 # Installer logs
 pip-log.txt

@@ -28,6 +28,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # A .gitignore rule once excluded packaging/espec.spec, so the release
+      # build failed on a file that was present locally and absent in git.
+      # Check the packaging inputs are actually tracked.
+      - name: Packaging files are committed
+        shell: bash
+        run: |
+          missing=0
+          for f in packaging/espec.spec packaging/windows/espec.iss \
+                   packaging/windows/espec.ico packaging/linux/build-deb.sh \
+                   packaging/linux/espec-burn-in.desktop \
+                   packaging/linux/espec-burn-in.png \
+                   packaging/release-notes.md; do
+            if [ -z "$(git ls-files "$f")" ]; then
+              echo "::error::$f is not tracked by git - the release build needs it"
+              missing=1
+            fi
+          done
+          exit $missing
+
       - name: Lint
         run: ruff check espec_burnin tests
 
