@@ -5,14 +5,16 @@ tenths-degree encoding -- so the production driver can be exercised end to end
 with no chamber.  Also models thermal lag, so ramp-rate behaviour and the
 "chamber cannot keep up" failure path can be tested.
 
-Linux/macOS only (uses pty).  On Windows, use a com0com virtual pair or run the
-tests under WSL; CI runs them on ubuntu-latest.
+The encoding helpers work everywhere.  ``ChamberSimulator`` itself needs a
+pseudo-terminal, so it is POSIX only; on Windows use a com0com virtual pair or
+run under WSL.  ``pty`` is imported lazily for exactly that reason: importing it
+at module scope made this module -- and every test that touches it --
+unimportable on Windows, before any skip marker could apply.
 """
 
 from __future__ import annotations
 
 import os
-import pty
 import threading
 
 REG_PROCESS_VALUE = 100
@@ -60,6 +62,14 @@ class ChamberSimulator:
         self.max_ramp_c_per_min = max_ramp_c_per_min
         self.time_scale = time_scale
         self.instant = True  # tests that only care about encoding skip the lag
+
+        try:
+            import pty
+        except ImportError as exc:  # pragma: no cover - Windows has no pty
+            raise RuntimeError(
+                "ChamberSimulator needs a pseudo-terminal, which Windows does not "
+                "provide. Use a com0com virtual serial pair, or run under WSL."
+            ) from exc
 
         self._master_fd, self._slave_fd = pty.openpty()
         self.port = os.ttyname(self._slave_fd)

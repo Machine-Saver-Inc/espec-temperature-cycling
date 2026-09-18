@@ -9,25 +9,61 @@ potted.
 > over-temperature limit controller is the protective device. It must be set
 > correctly and working before any unattended run.
 
-## Install
+## Download
 
-Download the file for your machine from the
-[latest release](https://github.com/Machine-Saver-Inc/espec-temperature-cycling/releases/latest).
-Nothing else is needed — Python and everything else is bundled.
+### **[⬇ Get the latest release](https://github.com/Machine-Saver-Inc/espec-temperature-cycling/releases/latest)**
 
-| Platform | Download | Notes |
-| --- | --- | --- |
-| Windows 10/11 | `EspecBurnIn-Setup-<version>.exe` | Installs per-user, no administrator rights, adds a desktop icon |
-| Debian / Ubuntu | `espec-burn-in_<version>_amd64.deb` | `sudo apt install ./espec-burn-in_<version>_amd64.deb` |
-| Any Linux | `EspecBurnIn-<version>-x86_64.AppImage` | `chmod +x` it and run it |
+Nothing else is needed — Python, Qt and every dependency are bundled. The
+download is around 60 MB.
 
-The installers are not code-signed yet, so Windows shows
-*"Windows protected your PC"*. Click **More info → Run anyway**.
+### Windows 10 / 11
 
-On Linux, opening a serial port needs group membership:
+1. Open the link above and download **`EspecBurnIn-Setup-<version>.exe`** from
+   the *Assets* list at the bottom of the release.
+2. Double-click it.
+3. Windows will say **"Windows protected your PC"**. This is expected — the
+   installer is not code-signed yet. Click **More info**, then **Run anyway**.
+4. Click through the installer. It needs **no administrator rights** and
+   installs for your user only. Leave *Create a desktop shortcut* ticked.
+5. Launch **Espec Burn-In** from the desktop icon.
+
+To update later, install the newer version over the top; settings and past
+results are kept. The program also tells you when a new version exists.
+
+### Debian / Ubuntu
+
+Download **`espec-burn-in_<version>_amd64.deb`**, then:
+
+```sh
+sudo apt install ./espec-burn-in_<version>_amd64.deb
+```
+
+It appears in your applications menu as *Espec Burn-In*.
+
+### Other Linux
+
+Download **`EspecBurnIn-<version>-x86_64.AppImage`**, then:
+
+```sh
+chmod +x EspecBurnIn-*.AppImage
+./EspecBurnIn-*.AppImage
+```
+
+### Linux: serial port permission
+
+Opening a serial port needs group membership. If the program says it cannot
+open the port:
 
 ```sh
 sudo usermod -aG dialout $USER   # then log out and back in
+```
+
+### Checking what you downloaded
+
+Every release includes `SHA256SUMS`. To verify:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ## Running a burn-in

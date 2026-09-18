@@ -18,8 +18,11 @@ from espec_burnin.hardware.simulator import (
     to_signed_register,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="pty-backed simulator is POSIX only"
+# Only the tests that open a pseudo-terminal are POSIX-only. The encoding
+# tests below run everywhere, including Windows, which is where the program
+# actually ships.
+needs_pty = pytest.mark.skipif(
+    sys.platform == "win32", reason="the pty-backed simulator is POSIX only"
 )
 
 CYCLE_TEMPERATURES = [-20.0, -10.5, -0.1, 0.0, 23.6, 45.0, 80.0]
@@ -34,6 +37,7 @@ def chamber():
 
 
 @pytest.mark.parametrize("celsius", CYCLE_TEMPERATURES)
+@needs_pty
 def test_setpoint_round_trips_with_correct_sign(chamber, celsius):
     sim, driver = chamber
     driver.write_setpoint(celsius)
@@ -42,12 +46,14 @@ def test_setpoint_round_trips_with_correct_sign(chamber, celsius):
 
 
 @pytest.mark.parametrize("celsius", CYCLE_TEMPERATURES)
+@needs_pty
 def test_temperature_reads_back_with_correct_sign(chamber, celsius):
     sim, driver = chamber
     sim.temperature_c = celsius
     assert driver.read_temperature() == pytest.approx(celsius, abs=0.05)
 
 
+@needs_pty
 def test_notebook_unsigned_read_bug_is_fixed(chamber):
     """Bug 1: `read_register(100, functioncode=3) / 10` reports -20 degC as 6533.6."""
     sim, driver = chamber
@@ -60,6 +66,7 @@ def test_notebook_unsigned_read_bug_is_fixed(chamber):
     assert driver.read_temperature() == pytest.approx(-20.0)
 
 
+@needs_pty
 def test_notebook_positive_setpoint_bug_is_fixed(chamber):
     """Bug 2: `convert_oven(t) = 65536 - abs(t)*10` turns +65 degC into -65 degC."""
     sim, driver = chamber
@@ -73,6 +80,7 @@ def test_notebook_positive_setpoint_bug_is_fixed(chamber):
     assert sim.setpoint_c == pytest.approx(65.0)
 
 
+@needs_pty
 def test_implausible_reading_is_rejected(chamber):
     """A reading outside the plausible band must raise, not be logged as data.
 
@@ -87,6 +95,7 @@ def test_implausible_reading_is_rejected(chamber):
         driver.read_temperature()
 
 
+@needs_pty
 def test_write_function_code_6_also_works(chamber):
     """Some F4s want function code 6 rather than minimalmodbus's default 16."""
     sim, _ = chamber

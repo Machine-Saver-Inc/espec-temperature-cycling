@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, without the leading v (e.g. 0.1.0)"
+        required: true
 
 permissions:
   contents: write
@@ -23,11 +28,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Resolve version from the tag
+      - name: Resolve the version
         shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
 
-      # One source of truth: the build can never disagree with its tag.
+      # One source of truth: a build can never disagree with its tag.
       - name: Stamp the version
         shell: bash
         run: |
@@ -43,12 +53,21 @@ jobs:
         run: pyinstaller --noconfirm --clean packaging/espec.spec
 
       # --- Windows -------------------------------------------------------
+      # Inno Setup is NOT preinstalled on the GitHub Windows runners.
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+
       - name: Build the Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          & $iscc "/DAppVersion=$env:VERSION" "/O$PWD\dist" packaging\windows\espec.iss
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          $out = Join-Path $PWD 'dist'
+          & $iscc "/DAppVersion=$env:VERSION" "/O$out" 'packaging\windows\espec.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+          Get-ChildItem dist -Filter *.exe | ForEach-Object { Write-Host $_.Name }
 
       # --- Linux ---------------------------------------------------------
       - name: Build the .deb
@@ -59,7 +78,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libfuse2 file
+          sudo apt-get install -y --no-install-recommends desktop-file-utils file
           curl -fsSL -o appimagetool \
             https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
@@ -68,8 +87,8 @@ jobs:
           mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
                    "$APPDIR/usr/share/icons/hicolor/256x256/apps"
           cp -r dist/EspecBurnIn/. "$APPDIR/usr/bin/"
-          cp packaging/linux/espec-burn-in.desktop "$APPDIR/espec-burn-in.desktop"
-          sed -i 's|^Exec=.*|Exec=EspecBurnIn|' "$APPDIR/espec-burn-in.desktop"
+          sed 's|^Exec=.*|Exec=EspecBurnIn|' packaging/linux/espec-burn-in.desktop \
+            > "$APPDIR/espec-burn-in.desktop"
           cp "$APPDIR/espec-burn-in.desktop" "$APPDIR/usr/share/applications/"
           cp packaging/linux/espec-burn-in.png "$APPDIR/espec-burn-in.png"
           cp packaging/linux/espec-burn-in.png \
@@ -77,8 +96,9 @@ jobs:
           printf '#!/bin/sh\nexec "$(dirname "$0")/usr/bin/EspecBurnIn" "$@"\n' > "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
 
-          ARCH=x86_64 ./appimagetool --no-appstream "$APPDIR" \
-            "dist/EspecBurnIn-$VERSION-x86_64.AppImage"
+          # The runner has no FUSE, so run appimagetool by extracting it instead.
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool --no-appstream \
+            "$APPDIR" "dist/EspecBurnIn-$VERSION-x86_64.AppImage"
 
       - name: Collect the artifacts
         shell: bash
@@ -88,20 +108,33 @@ jobs:
             \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' \) \
             -exec cp {} out/ \;
           ls -la out
+          test -n "$(ls -A out)" || { echo "no artifacts were produced"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
           name: build-${{ runner.os }}
           path: out/*
+          if-no-files-found: error
 
   publish:
     name: Publish the release
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: staged
+
+      - name: Resolve the version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
 
       - name: Gather and checksum
         run: |
@@ -110,11 +143,23 @@ jobs:
           cd out
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+          ls -la
 
-      # SHA256SUMS is what the in-app updater verifies downloads against, so it
-      # must be attached to every release.
+      # SHA256SUMS is what the in-app updater checks downloads against, so it
+      # has to be attached to every release.
+      # The release page is where people land to download, so it carries the
+      # install instructions rather than just a commit list.
+      - name: Build the release notes
+        run: sed "s/<version>/$VERSION/g" packaging/release-notes.md > out/NOTES.md
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: out/*
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+          tag_name: v${{ env.VERSION }}
+          name: Espec Burn-In v${{ env.VERSION }}
+          body_path: out/NOTES.md
+          files: |
+            out/*.exe
+            out/*.deb
+            out/*.AppImage
+            out/SHA256SUMS
+          fail_on_unmatched_files: false

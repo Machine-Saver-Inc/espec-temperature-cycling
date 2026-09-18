@@ -18,8 +18,9 @@ from espec_burnin.core.run_controller import RunController, RunState
 from espec_burnin.hardware.f4 import WatlowF4
 from espec_burnin.hardware.simulator import ChamberSimulator
 
+# Every test here drives the pty-backed simulator.
 pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="pty-backed simulator is POSIX only"
+    sys.platform == "win32", reason="the pty-backed simulator is POSIX only"
 )
 
 
