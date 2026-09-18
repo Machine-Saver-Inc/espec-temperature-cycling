@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "espec-burn-in"
+dynamic = ["version"]
+description = "Temperature cycling for PCB burn-in in an Espec chamber via a Watlow F4 controller"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Machine Saver Inc" }]
+
+dependencies = [
+    "PySide6-Essentials>=6.6",
+    "pyqtgraph>=0.13",
+    "pyserial>=3.5",
+    "minimalmodbus>=2.1",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4", "pyinstaller>=6.3"]
+
+[project.gui-scripts]
+espec-burn-in = "espec_burnin.ui.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "espec_burnin._version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["espec_burnin*"]
+
+[tool.setuptools.package-data]
+espec_burnin = ["resources/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

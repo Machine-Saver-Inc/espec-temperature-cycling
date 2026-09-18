@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Espec Burn-In
+GenericName=Temperature cycling
+Comment=Cycle an Espec chamber for PCB burn-in testing
+Exec=/opt/espec-burn-in/EspecBurnIn
+Icon=espec-burn-in
+Terminal=false
+Categories=Science;Engineering;Utility;
+Keywords=temperature;chamber;burn-in;espec;watlow;
+StartupWMClass=EspecBurnIn

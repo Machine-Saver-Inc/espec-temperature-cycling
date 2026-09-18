@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version from the tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # One source of truth: the build can never disagree with its tag.
+      - name: Stamp the version
+        shell: bash
+        run: |
+          printf '__version__ = "%s"\n' "$VERSION" > espec_burnin/_version.py
+          cat espec_burnin/_version.py
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/espec.spec
+
+      # --- Windows -------------------------------------------------------
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=$env:VERSION" "/O$PWD\dist" packaging\windows\espec.iss
+
+      # --- Linux ---------------------------------------------------------
+      - name: Build the .deb
+        if: runner.os == 'Linux'
+        run: bash packaging/linux/build-deb.sh "$VERSION"
+
+      - name: Build the AppImage
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libfuse2 file
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+          APPDIR=EspecBurnIn.AppDir
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
+                   "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp -r dist/EspecBurnIn/. "$APPDIR/usr/bin/"
+          cp packaging/linux/espec-burn-in.desktop "$APPDIR/espec-burn-in.desktop"
+          sed -i 's|^Exec=.*|Exec=EspecBurnIn|' "$APPDIR/espec-burn-in.desktop"
+          cp "$APPDIR/espec-burn-in.desktop" "$APPDIR/usr/share/applications/"
+          cp packaging/linux/espec-burn-in.png "$APPDIR/espec-burn-in.png"
+          cp packaging/linux/espec-burn-in.png \
+             "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
+          printf '#!/bin/sh\nexec "$(dirname "$0")/usr/bin/EspecBurnIn" "$@"\n' > "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          ARCH=x86_64 ./appimagetool --no-appstream "$APPDIR" \
+            "dist/EspecBurnIn-$VERSION-x86_64.AppImage"
+
+      - name: Collect the artifacts
+        shell: bash
+        run: |
+          mkdir -p out
+          find dist -maxdepth 1 -type f \
+            \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' \) \
+            -exec cp {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ runner.os }}
+          path: out/*
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+
+      - name: Gather and checksum
+        run: |
+          mkdir -p out
+          find staged -type f -exec cp {} out/ \;
+          cd out
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # SHA256SUMS is what the in-app updater verifies downloads against, so it
+      # must be attached to every release.
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

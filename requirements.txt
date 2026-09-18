@@ -1,0 +1,5 @@
+PySide6-Essentials>=6.6
+pyqtgraph>=0.13
+pyserial>=3.5
+minimalmodbus>=2.1
+numpy>=1.24
