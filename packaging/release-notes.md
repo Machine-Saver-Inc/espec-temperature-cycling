@@ -6,8 +6,10 @@
 | **Debian / Ubuntu** | `espec-burn-in_<version>_amd64.deb` |
 | **Other Linux** | `EspecBurnIn-<version>-x86_64.AppImage` |
 
-All the files are in the **Assets** list at the bottom of this page. Nothing
-else is needed — Python, Qt and every dependency are bundled. About 60 MB.
+All the files are in the **Assets** list at the bottom of this page, with their
+exact sizes. Nothing else is needed — Python, Qt and every dependency are
+bundled, so the downloads are large (40–90 MB) but there is nothing to install
+afterwards.
 
 ### Installing on Windows
 

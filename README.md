@@ -13,8 +13,9 @@ potted.
 
 ### **[⬇ Get the latest release](https://github.com/Machine-Saver-Inc/espec-temperature-cycling/releases/latest)**
 
-Nothing else is needed — Python, Qt and every dependency are bundled. The
-download is around 60 MB.
+Nothing else is needed — Python, Qt and every dependency are bundled, so the
+downloads are large (40–90 MB depending on platform) but there is nothing to
+install afterwards. Each release page lists the exact size beside every file.
 
 ### Windows 10 / 11
 
