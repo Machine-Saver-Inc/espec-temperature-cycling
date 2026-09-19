@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.13.0]
+
+### Fixed
+- **The update still failed on certificates, and the retry was the reason**
+  (issue #7). A fallback to the bundled certificate list ran only *after* a
+  failure, and only when that failure arrived as an SSL error. Windows fills
+  its root store on demand rather than shipping it complete, so a host it has
+  never fetched a root for is the ordinary case on a chamber PC - every such
+  request paid for a doomed attempt first, and any failure that did not present
+  as an SSL error skipped the retry altogether. There is no retry now: one
+  connection carries the machine's own certificates *and* the ones we ship, so
+  a company proxy's CA still works and a root Windows has never seen no longer
+  needs a failure first.
+- **Every button now looks like a button** (issue #6). Setting a padding and a
+  corner radius without also setting a border and a background makes Qt discard
+  the native button appearance, which is why most of them rendered as bare
+  words with nothing to press. Primary, secondary and stop buttons are each
+  described in full, including hover, pressed, focused and disabled, and every
+  one carries a mark on the left. A disabled primary is a muted blue rather
+  than grey, so it reads as "not yet" instead of broken.
+
+### Added
+- **A report now says what you did just before it** (issue #5). The program
+  records which screens were opened and which buttons were pressed - labels
+  only, never anything typed - and the last fifteen go into the report in
+  place of three blank numbered lines. A button pressed repeatedly is one line
+  with a count rather than fifteen identical ones.
+- **The report is editable before it is sent.** What is posted is exactly what
+  the preview says, so a detail can be added or taken out first. An edited
+  report too long for the address bar sends its title and asks you to paste the
+  rest, rather than cutting text somebody wrote.
+
 ## [0.12.0]
 
 ### Removed

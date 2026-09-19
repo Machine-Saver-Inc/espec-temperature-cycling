@@ -165,3 +165,92 @@ def test_special_characters_survive_the_url():
 
 def test_the_report_never_raises_on_odd_context():
     Report(context={"weird": None, "blank": "", "number": 42}).body()
+
+
+# --- issue #5: a report should say what the person did ---------------------
+
+
+def test_the_report_carries_what_was_done_just_before():
+    from espec_burnin.core.trail import Trail
+
+    trail = Trail()
+    trail.opened("Home")
+    trail.pressed("Measure the chamber's speed")
+    trail.pressed("Start the test")
+
+    body = Report(kind="bug", summary="stalls", trail=trail.lines()).body()
+
+    assert "What was done just before this" in body
+    assert "Start the test" in body
+    assert "opened Home" in body
+
+
+def test_the_trail_replaces_the_empty_steps_to_reproduce():
+    """Three blank numbered lines are worse than nothing when the program
+    already knows the answer."""
+    from espec_burnin.core.trail import Trail
+
+    trail = Trail()
+    trail.pressed("Continue")
+
+    with_trail = Report(kind="bug", trail=trail.lines()).body()
+    without = Report(kind="bug").body()
+
+    assert "Steps to reproduce" not in with_trail
+    assert "Steps to reproduce" in without
+
+
+def test_a_repeated_press_is_one_line_with_a_count():
+    """Someone pressing Update now six times must not push the useful part of
+    the trail out of the report."""
+    from espec_burnin.core.trail import Trail
+
+    trail = Trail()
+    trail.opened("Home")
+    for _ in range(6):
+        trail.pressed("Update now")
+
+    lines = trail.lines()
+    assert len(lines) == 2
+    assert lines[-1].endswith("×6")
+
+
+def test_the_trail_keeps_only_the_recent_past():
+    from espec_burnin.core.trail import KEPT, SHOWN, Trail
+
+    trail = Trail()
+    for index in range(KEPT * 2):
+        trail.pressed(f"button {index}")
+
+    assert len(trail) == KEPT
+    assert len(trail.lines()) == SHOWN
+    assert f"button {KEPT * 2 - 1}" in trail.lines()[-1]
+
+
+def test_an_edited_report_is_what_gets_posted():
+    """The preview is editable, so the URL has to carry the edit rather than
+    the text the program would have written."""
+    from espec_burnin.core.diagnostics import issue_url, split_edited
+
+    edited = "[Bug] My own title\n\nMy own words, and nothing else."
+    title, body = split_edited(edited)
+    assert title == "[Bug] My own title"
+    assert body == "My own words, and nothing else."
+
+    url, trimmed = issue_url(Report(kind="bug", summary="ignored"), edited=edited)
+    assert not trimmed
+    assert "My+own+title" in url or "My%20own%20title" in url
+    assert "ignored" not in url
+
+
+def test_an_over_long_edit_sends_the_title_and_says_to_paste():
+    """Nothing is cut out of the middle of text a person wrote."""
+    from espec_burnin.core.diagnostics import issue_url
+
+    edited = "[Bug] Too long\n\n" + ("x" * 12000)
+    url, trimmed = issue_url(Report(kind="bug"), edited=edited)
+
+    assert trimmed
+    assert len(url) <= MAX_URL_CHARS
+    assert "xxxx" not in url
+    assert "paste" in url

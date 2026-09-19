@@ -245,3 +245,60 @@ def test_changing_a_hidden_field_still_reaches_the_saved_settings(app):
     assert connection.baudrate == 38400
     assert connection.retries == 5
     assert tuning.setpoint_epsilon_c == pytest.approx(0.4)
+
+
+def test_pressing_a_button_is_recorded_without_the_screen_doing_anything(app):
+    """Every button is made in one place, which is the one place a press can
+    be noted - a new screen cannot forget to record its own buttons."""
+    from espec_burnin.core.trail import TRAIL
+    from espec_burnin.ui.widgets import button
+
+    TRAIL.clear()
+    made = button("Start the test", "start")
+    made.click()
+    assert any("pressed Start the test" in line for line in TRAIL.lines())
+    TRAIL.clear()
+
+
+def test_opening_a_screen_is_recorded(app):
+    from espec_burnin.core.trail import TRAIL
+    from espec_burnin.ui.main_window import CAPABILITY, MainWindow
+
+    window = MainWindow()
+    TRAIL.clear()
+    window.stack.setCurrentIndex(CAPABILITY)
+    assert any("Measure the chamber's speed" in line for line in TRAIL.lines())
+    TRAIL.clear()
+    window.close()
+
+
+def test_the_trail_reaches_the_dialog(app):
+    from espec_burnin.core.trail import TRAIL
+    from espec_burnin.ui.report_dialog import ReportDialog
+
+    TRAIL.clear()
+    TRAIL.pressed("Continue")
+    dialog = ReportDialog({"Screen open": "Choose the test"})
+    assert any("Continue" in line for line in dialog.report.trail)
+    assert "Continue" in dialog.preview.toPlainText()
+    TRAIL.clear()
+
+
+def test_editing_the_preview_stops_the_program_overwriting_it(app):
+    from espec_burnin.ui.report_dialog import ReportDialog
+
+    dialog = ReportDialog({"Screen open": "Home"})
+    dialog.preview.setPlainText("[Bug] Mine\n\nOnly what I wrote.")
+    dialog.summary.setText("this must not reappear in the preview")
+
+    assert dialog.preview.toPlainText() == "[Bug] Mine\n\nOnly what I wrote."
+    assert dialog._text() == "[Bug] Mine\n\nOnly what I wrote."
+
+
+def test_every_button_role_renders_its_icon(app):
+    """A null icon is silent: QIcon(QImage) yields one and never raises."""
+    from espec_burnin.ui.widgets import button
+
+    for role in ("primary", "secondary", "danger"):
+        made = button("Press me", "save", role)
+        assert not made.icon().isNull(), f"{role} lost its icon"

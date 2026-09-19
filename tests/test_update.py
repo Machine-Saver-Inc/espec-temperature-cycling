@@ -327,7 +327,7 @@ def test_the_explanation_always_includes_the_underlying_error():
 
 
 def test_every_network_default_in_the_update_code_is_the_shared_opener():
-    """A bare urlopen default is the shape of the bug: it skips the fallback."""
+    """A bare urlopen default is the shape of the bug: it skips our trust store."""
     import inspect
 
     from espec_burnin.update import checker, installer
@@ -346,51 +346,91 @@ def test_every_network_default_in_the_update_code_is_the_shared_opener():
                 offenders.append(f"{module.__name__}.{name}")
     assert not offenders, (
         f"these take an opener that is not the shared one: {offenders}. "
-        "Use espec_burnin.update.net.open_url so the certificate fallback applies."
+        "Use espec_burnin.update.net.open_url so both certificate stores apply."
     )
 
 
-def ssl_refusing_once(payload: bytes):
-    """Fails the way a machine with an unusable trust store fails: SSLError
-    with no context, success once a CA bundle is supplied."""
-    import ssl
-
+def recording_opener(payload: bytes):
+    """Records the SSL context each request was opened with."""
     calls = []
 
     def _open(request, timeout=None, context=None):
         calls.append(context)
-        if context is None:
-            raise urllib.error.URLError(ssl.SSLError("CERTIFICATE_VERIFY_FAILED"))
         return FakeResponse(payload)
 
     return _open, calls
 
 
-def test_the_download_retries_with_certifi_when_the_system_store_fails(monkeypatch, tmp_path):
+# --- issue #7: the retry was the next bug --------------------------------
+#
+# The certifi fallback only ran after a failure, and only when that failure
+# arrived as an ssl.SSLError. Windows fills its root store on demand, so a host
+# it has never fetched a root for is the normal case on a chamber PC - every
+# such request paid for a doomed attempt first, and any failure that did not
+# present as an SSLError skipped the retry altogether. One context carrying
+# both stores removes the retry and the whole class of failure with it.
+
+
+def test_one_attempt_carrying_both_certificate_stores(monkeypatch, tmp_path):
     import urllib.request
 
     from espec_burnin.update import net
 
-    fake, calls = ssl_refusing_once(PAYLOAD)
+    net.trust.cache_clear()
+    fake, calls = recording_opener(PAYLOAD)
     monkeypatch.setattr(urllib.request, "urlopen", fake)
 
     path = download_asset(make_release(), destination=tmp_path, opener=net.open_url)
 
     assert path.read_bytes() == PAYLOAD
-    assert len(calls) == 2, "it must try the system store first, then certifi"
-    assert calls[0] is None and calls[1] is not None
+    assert len(calls) == 1, "a doomed first attempt is not a design"
+    assert calls[0] is not None, "the request must carry our own trust context"
 
 
-def test_the_checksum_list_retries_with_certifi_too(monkeypatch):
-    """Verification fetches over the network as well; if only the download
-    fell back, a good download would still be refused as unverified."""
+def test_the_bundled_certificates_are_added_to_the_machine_store(monkeypatch):
+    """Added, not substituted: a company proxy's own CA lives in the machine
+    store and has to keep working."""
+    import ssl
+
+    from espec_burnin.update import net
+
+    loaded = []
+    real = ssl.create_default_context
+
+    def spy():
+        context = real()
+        original = context.load_verify_locations
+
+        def record(cafile=None, **kwargs):
+            loaded.append(cafile)
+            return original(cafile=cafile, **kwargs)
+
+        context.load_verify_locations = record
+        return context
+
+    monkeypatch.setattr(ssl, "create_default_context", spy)
+    net.trust.cache_clear()
+    try:
+        context = net.trust()
+    finally:
+        net.trust.cache_clear()
+
+    assert loaded, "the bundled certificates were never loaded"
+    assert "cacert" in loaded[0]
+    assert context.get_ca_certs(), "the machine's own roots are still there"
+
+
+def test_the_checksum_list_uses_the_same_trust(monkeypatch):
+    """Verification fetches over the network too; if only the download were
+    covered, a good download would still be refused as unverified."""
     import urllib.request
 
     from espec_burnin.update import net
     from espec_burnin.update.installer import fetch_checksums
 
+    net.trust.cache_clear()
     digest = hashlib.sha256(PAYLOAD).hexdigest()
-    fake, calls = ssl_refusing_once(
+    fake, calls = recording_opener(
         f"{digest}  EspecBurnIn-Setup-0.9.0.exe\n".encode()
     )
     monkeypatch.setattr(urllib.request, "urlopen", fake)
@@ -398,7 +438,29 @@ def test_the_checksum_list_retries_with_certifi_too(monkeypatch):
     text = fetch_checksums(make_release(), opener=net.open_url)
 
     assert digest in text
-    assert len(calls) == 2
+    assert len(calls) == 1 and calls[0] is not None
+
+
+def test_a_build_without_certifi_still_opens_connections(monkeypatch):
+    """If packaging ever drops the bundle, the machine's own store must still
+    be used rather than the program refusing to talk to GitHub at all."""
+    import builtins
+
+    from espec_burnin.update import net
+
+    real_import = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == "certifi":
+            raise ImportError("no certifi in this build")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    net.trust.cache_clear()
+    try:
+        assert net.trust().get_ca_certs()
+    finally:
+        net.trust.cache_clear()
 
 
 def test_a_non_certificate_failure_is_not_retried(monkeypatch, tmp_path):

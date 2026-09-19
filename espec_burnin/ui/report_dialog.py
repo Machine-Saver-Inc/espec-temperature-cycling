@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from espec_burnin.core.diagnostics import Report, issue_url, read_log_tail
+from espec_burnin.core.trail import TRAIL
+from espec_burnin.ui.widgets import button
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +63,9 @@ class ReportDialog(QDialog):
         self.setWindowTitle("Report a problem or an idea")
         self.setMinimumWidth(620)
 
-        self.report = Report(context=context, log_tail=read_log_tail())
+        self.report = Report(
+            context=context, trail=TRAIL.lines(), log_tail=read_log_tail()
+        )
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -94,26 +98,36 @@ class ReportDialog(QDialog):
         layout.addWidget(self.description)
 
         self.note = QLabel(
-            "The details below are collected automatically and go with the report. "
-            "This repository is public, so check you are happy with them — paths "
-            "under your home folder are shortened to <code>~</code>."
+            "The details below are collected automatically and go with the report, "
+            "including which screens you opened and which buttons you pressed. "
+            "Edit anything you like — what is posted is what this box says. This "
+            "repository is public, so check you are happy with it; paths under "
+            "your home folder are shortened to <code>~</code>."
         )
         self.note.setWordWrap(True)
         self.note.setTextFormat(Qt.RichText)
         self.note.setObjectName("Subtitle")
         layout.addWidget(self.note)
 
+        # Editable, not just visible. The report is about to be posted to a
+        # public repository under the user's name; being able to add a line or
+        # take one out is the difference between showing someone their data
+        # and letting them decide about it.
         self.preview = QPlainTextEdit()
-        self.preview.setReadOnly(True)
         self.preview.setMinimumHeight(180)
+        self._edited = False
+        self._loading = False
+        self.preview.textChanged.connect(self._preview_edited)
         layout.addWidget(self.preview, 1)
 
+        # Built from the shared button so the three read as the same kind of
+        # control. They used to be a filled one and two bare words.
         buttons = QDialogButtonBox()
-        self.post = buttons.addButton("Open GitHub to post it",
-                                      QDialogButtonBox.AcceptRole)
-        self.post.setObjectName("Primary")
-        self.copy = buttons.addButton("Copy to clipboard", QDialogButtonBox.ActionRole)
-        buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.post = button("Open GitHub to post it", "open", "primary")
+        buttons.addButton(self.post, QDialogButtonBox.AcceptRole)
+        self.copy = button("Copy to clipboard", "copy")
+        buttons.addButton(self.copy, QDialogButtonBox.ActionRole)
+        buttons.addButton(button("Cancel", "cancel"), QDialogButtonBox.RejectRole)
         buttons.accepted.connect(self._post)
         buttons.rejected.connect(self.reject)
         self.copy.clicked.connect(self._copy)
@@ -128,14 +142,35 @@ class ReportDialog(QDialog):
         self.report.description = self.description.toPlainText()
         return self.report
 
-    def _refresh(self) -> None:
+    def _preview_edited(self) -> None:
+        """Once it has been touched by hand, the program stops rewriting it."""
+        if not self._loading:
+            self._edited = True
+            self.note.setText(
+                "You have edited the report below. What is posted is exactly "
+                "what it says now."
+            )
+
+    def _text(self) -> str:
+        """What will actually be posted."""
+        if self._edited:
+            return self.preview.toPlainText()
         report = self._current()
-        self.preview.setPlainText(f"{report.title}\n\n{report.body()}")
+        return f"{report.title}\n\n{report.body()}"
+
+    def _refresh(self) -> None:
         self.post.setEnabled(bool(self.summary.text().strip()))
+        if self._edited:
+            return
+        report = self._current()
+        self._loading = True
+        try:
+            self.preview.setPlainText(f"{report.title}\n\n{report.body()}")
+        finally:
+            self._loading = False
 
     def _copy(self) -> None:
-        report = self._current()
-        QGuiApplication.clipboard().setText(f"{report.title}\n\n{report.body()}")
+        QGuiApplication.clipboard().setText(self._text())
         QMessageBox.information(
             self, "Copied",
             "The whole report is on your clipboard. Paste it into a new issue.",
@@ -143,11 +178,11 @@ class ReportDialog(QDialog):
 
     def _post(self) -> None:
         report = self._current()
-        url, trimmed = issue_url(report)
+        url, trimmed = issue_url(report, edited=self._text() if self._edited else None)
 
         # On the clipboard either way: if the log had to be dropped to fit the
         # address bar, the full text is still one paste away.
-        QGuiApplication.clipboard().setText(f"{report.title}\n\n{report.body()}")
+        QGuiApplication.clipboard().setText(self._text())
 
         if not webbrowser.open(url):
             QMessageBox.warning(

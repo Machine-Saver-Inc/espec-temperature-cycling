@@ -26,6 +26,7 @@ from espec_burnin.core.chambers import find_by_adapter, save_chamber
 from espec_burnin.core.profile import Recipe, format_duration
 from espec_burnin.core.recorder import Recorder, results_root
 from espec_burnin.core.run_controller import RunController, RunState
+from espec_burnin.core.trail import TRAIL
 from espec_burnin.hardware.errors import ChamberError
 from espec_burnin.hardware.f4 import WatlowF4
 from espec_burnin.ui import settings as settings_mod
@@ -35,6 +36,7 @@ from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_er
 from espec_burnin.ui.report_dialog import ReportDialog, report_icon
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
+from espec_burnin.ui.widgets import button
 from espec_burnin.update.checker import (
     RELEASES_PAGE,
     CheckOutcome,
@@ -114,15 +116,15 @@ class UpdateBanner(QFrame):
         layout.addWidget(self.label)
         layout.addStretch(1)
 
-        notes = QPushButton("What's new")
+        notes = button("What's new", "notes")
         notes.clicked.connect(self._show_notes)
         layout.addWidget(notes)
 
-        update = QPushButton("Update now")
+        update = button("Update now", "download", "primary")
         update.clicked.connect(self._open_release)
         layout.addWidget(update)
 
-        later = QPushButton("Later")
+        later = button("Later", "later")
         later.clicked.connect(self.hide)
         layout.addWidget(later)
 
@@ -175,12 +177,14 @@ class MainWindow(QMainWindow):
         # hunting for where to report it.
         footer = QHBoxLayout()
         footer.setContentsMargins(14, 6, 14, 10)
-        self.report_button = QPushButton("  Report a problem")
+        # Its own mark rather than one from the shared set: the journal and
+        # bug is what the user is told to look for in the README.
+        self.report_button = QPushButton("Report a problem")
         self.report_button.setObjectName("Report")
         self.report_button.setIcon(
-            report_icon(self.palette().windowText().color().name())
+            report_icon(self.palette().buttonText().color().name(), 18)
         )
-        self.report_button.setIconSize(QSize(20, 20))
+        self.report_button.setIconSize(QSize(18, 18))
         self.report_button.setToolTip(
             "Report a bug or suggest an improvement, with the program's current "
             "state filled in for you"
@@ -204,6 +208,12 @@ class MainWindow(QMainWindow):
             failed=self.settings.get("last_update_check_failed", False),
         )
         self.stack.addWidget(self.home)
+
+        # Screens switch from a dozen places; noting it once here means a new
+        # route between screens cannot forget to be recorded.
+        self.stack.currentChanged.connect(
+            lambda index: TRAIL.opened(self.SCREEN_NAMES.get(index, "?"))
+        )
 
         self.connect_page = ConnectPage(self.connection)
         self.connect_page.connected.connect(self._on_connected)

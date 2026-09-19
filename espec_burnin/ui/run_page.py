@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -25,6 +24,7 @@ except ImportError:  # pragma: no cover - plotting is optional at import time
 from espec_burnin.core.profile import format_duration
 from espec_burnin.core.run_controller import RunController, RunState, Status
 from espec_burnin.hardware.errors import ChamberError, NoReplyError
+from espec_burnin.ui.widgets import button
 
 
 class RunWorker(QThread):
@@ -100,17 +100,17 @@ class TroubleshootingPanel(QFrame):
         layout.addWidget(self.port_label)
 
         buttons = QHBoxLayout()
-        retry = QPushButton("Try again")
+        retry = button("Try again", "refresh")
         retry.setObjectName("Primary")
         retry.clicked.connect(self.retry)
         buttons.addWidget(retry)
 
-        change = QPushButton("Change port")
+        change = button("Change port", "connect")
         change.clicked.connect(self.change_port)
         buttons.addWidget(change)
 
         buttons.addStretch(1)
-        stop = QPushButton("Stop the run")
+        stop = button("Stop the run", "stop", "danger")
         stop.setObjectName("Danger")
         stop.clicked.connect(self.stop_run)
         buttons.addWidget(stop)
@@ -238,7 +238,7 @@ class RunPage(QWidget):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        self.stop = QPushButton("Stop run")
+        self.stop = button("Stop run", "stop", "danger")
         self.stop.setObjectName("Danger")
         self.stop.clicked.connect(self.stop_requested)
         buttons.addWidget(self.stop)

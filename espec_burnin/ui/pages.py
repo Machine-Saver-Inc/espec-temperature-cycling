@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QRadioButton,
     QScrollArea,
     QVBoxLayout,
@@ -32,6 +31,7 @@ from espec_burnin.hardware.f4 import ConnectionSettings
 from espec_burnin.ui.widgets import (
     TEXT_WIDTH,
     FieldGroup,
+    button,
     check,
     cycle_grid,
     int_spin,
@@ -92,21 +92,28 @@ class HomePage(QWidget):
         )
         layout.addSpacing(24)
 
-        start = primary("Start a burn-in run")
+        start = primary("Start a burn-in run", "start")
         start.clicked.connect(self.start_requested)
         layout.addWidget(start, alignment=Qt.AlignLeft)
 
-        results = QPushButton("Open past results")
+        results = button("Open past results", "folder")
         results.clicked.connect(self.results_requested)
         layout.addWidget(results, alignment=Qt.AlignLeft)
 
-        capability = QPushButton("Measure the chamber's speed")
+        capability = button("Measure the chamber's speed", "speed")
         capability.clicked.connect(self.capability_requested)
         layout.addWidget(capability, alignment=Qt.AlignLeft)
 
-        settings = QPushButton("Settings")
+        settings = button("Settings", "settings")
         settings.clicked.connect(self.settings_requested)
         layout.addWidget(settings, alignment=Qt.AlignLeft)
+
+        # One column, so they are one menu rather than three buttons that
+        # happen to be stacked. Sized to the widest of them.
+        menu = (start, results, capability, settings)
+        widest = max(b.sizeHint().width() for b in menu)
+        for b in menu:
+            b.setMinimumWidth(widest)
 
         layout.addStretch(2)
         self.status = QLabel("")
@@ -123,8 +130,7 @@ class HomePage(QWidget):
         self.version_label.setObjectName("Hint")
         footer.addWidget(self.version_label)
         footer.addSpacing(10)
-        self.check_now = QPushButton("Check for updates")
-        self.check_now.setFlat(True)
+        self.check_now = button("Check for updates", "refresh")
         self.check_now.clicked.connect(self.check_now_requested)
         footer.addWidget(self.check_now)
         footer.addStretch(1)
@@ -185,21 +191,21 @@ class ConnectPage(QWidget):
         layout.addWidget(self.result)
 
         buttons = QHBoxLayout()
-        self.test = primary("Test connection")
+        self.test = primary("Test connection", "connect")
         self.test.clicked.connect(self._test_selected)
         self.test.setEnabled(False)
         buttons.addWidget(self.test)
 
-        self.autodetect = QPushButton("Find it for me")
+        self.autodetect = button("Find it for me", "search")
         self.autodetect.clicked.connect(self._autodetect)
         buttons.addWidget(self.autodetect)
 
-        self.refresh_button = QPushButton("Check again")
+        self.refresh_button = button("Check again", "refresh")
         self.refresh_button.clicked.connect(self.refresh)
         buttons.addWidget(self.refresh_button)
 
         buttons.addStretch(1)
-        back = QPushButton("Back")
+        back = button("Back", "back")
         back.clicked.connect(self.back)
         buttons.addWidget(back)
         layout.addLayout(buttons)
@@ -351,7 +357,7 @@ class RecipePage(QWidget):
         self.capability_note.hide()
         layout.addWidget(self.capability_note)
 
-        self.use_measured = QPushButton("Use the measured times")
+        self.use_measured = button("Use the measured times", "speed")
         self.use_measured.clicked.connect(self._apply_measured)
         self.use_measured.hide()
         layout.addWidget(self.use_measured, alignment=Qt.AlignLeft)
@@ -482,11 +488,11 @@ class RecipePage(QWidget):
         layout.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
-        self.go = primary("Continue")
+        self.go = primary("Continue", "forward")
         self.go.clicked.connect(self._emit_start)
         buttons.addWidget(self.go)
         buttons.addStretch(1)
-        back = QPushButton("Back")
+        back = button("Back", "back")
         back.clicked.connect(self.back)
         buttons.addWidget(back)
         layout.addLayout(buttons)

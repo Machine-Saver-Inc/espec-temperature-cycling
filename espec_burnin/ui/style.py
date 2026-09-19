@@ -27,6 +27,14 @@ def ends(dark: bool = False) -> tuple[str, str]:
 
 def build_stylesheet(dark: bool = False) -> str:
     cold, hot = ends(dark)
+    # palette(mid) is too faint for a border on some Windows themes and too
+    # loud on others, so the edge is stated rather than borrowed.
+    edge = "#5a6570" if dark else "#bcc3cb"
+    sunk = "#2b3138" if dark else "#e9edf1"
+    muted = "#2f4470" if dark else "#a9c1ef"
+    muted_text = "#8fa3c4" if dark else "#f2f6fd"
+    focus_ring = "#9db8ee" if dark else "#14357f"
+    danger_wash = "#3a1f22" if dark else "#fdf0f1"
     return f"""
 QWidget {{ font-size: 14px; }}
 QLabel#Title {{ font-size: 26px; font-weight: 600; }}
@@ -36,19 +44,48 @@ QLabel#Target {{ font-size: 18px; color: palette(mid); }}
 QLabel#StatusGood {{ color: {GOOD}; font-weight: 600; }}
 QLabel#StatusWarn {{ color: {WARN}; font-weight: 600; }}
 QLabel#StatusBad {{ color: {BAD}; font-weight: 600; }}
-QPushButton {{ padding: 9px 18px; border-radius: 6px; }}
+/* Buttons ---------------------------------------------------------------
+   Setting padding and a radius without also setting a border and a background
+   makes Qt drop the native button look entirely, which is how every secondary
+   button in the program came to render as bare text with nothing to click.
+   Each role is now described in full, including the states. */
+QPushButton {{
+    background: palette(base);
+    color: palette(text);
+    border: 1px solid {edge};
+    border-radius: 6px;
+    padding: 8px 14px;
+    min-height: 18px;
+    /* Mark first, then the words. On a button sized to its text this changes
+       nothing; in a column of equal-width buttons it is what lines the marks
+       up instead of scattering them by label length. */
+    text-align: left;
+}}
+QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}
+QPushButton:pressed {{ background: {sunk}; }}
+QPushButton:disabled {{
+    color: palette(mid); border-color: {edge}; background: transparent;
+}}
+QPushButton:focus {{ border: 2px solid {ACCENT}; padding: 7px 13px; }}
+
 QPushButton#Primary {{
     background: {ACCENT}; color: white; font-weight: 600;
-    padding: 13px 26px; font-size: 16px; border: none; border-radius: 7px;
+    padding: 13px 26px; font-size: 16px; border: 1px solid {ACCENT};
+    border-radius: 7px;
 }}
-QPushButton#Primary:hover {{ background: #2560d0; }}
-QPushButton#Primary:disabled {{ background: palette(mid); color: palette(window); }}
-QPushButton#Danger {{ color: {BAD}; }}
-QPushButton#Report {{
-    padding: 6px 12px; border: 1px solid palette(mid); border-radius: 6px;
-    color: palette(text);
+QPushButton#Primary:hover {{ background: #2560d0; border-color: #2560d0; }}
+QPushButton#Primary:pressed {{ background: #1f52b4; border-color: #1f52b4; }}
+/* Muted accent rather than grey: a disabled primary should read as "not yet",
+   not as a dead control. */
+QPushButton#Primary:disabled {{
+    background: {muted}; border-color: {muted}; color: {muted_text};
 }}
-QPushButton#Report:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}
+QPushButton#Primary:focus {{ border: 2px solid {focus_ring}; padding: 12px 25px; }}
+
+QPushButton#Danger {{ color: {BAD}; border-color: {edge}; }}
+QPushButton#Danger:hover {{ border-color: {BAD}; color: {BAD}; background: {danger_wash}; }}
+
+QPushButton#Report {{ padding: 6px 12px; }}
 QFrame#Card {{
     border: 1px solid palette(mid); border-radius: 9px; background: palette(base);
 }}

@@ -92,6 +92,7 @@ class Report:
     summary: str = ""
     description: str = ""
     context: dict[str, str] = field(default_factory=dict)
+    trail: list[str] = field(default_factory=list)
     log_tail: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
 
@@ -117,6 +118,14 @@ class Report:
         if is_bug:
             parts.append("### What I expected instead")
             parts.append("_(fill in if it helps)_")
+
+        # What they did, before what the program was: the steps are usually
+        # the answer to "how do I reproduce this", and nobody should have to
+        # remember them.
+        if self.trail:
+            parts.append("### What was done just before this")
+            parts.append("```\n" + "\n".join(self.trail) + "\n```")
+        elif is_bug:
             parts.append("### Steps to reproduce")
             parts.append("1. \n2. \n3. ")
 
@@ -141,13 +150,42 @@ class Report:
         return "\n\n".join(parts)
 
 
-def issue_url(report: Report, base: str = NEW_ISSUE_URL) -> tuple[str, bool]:
+def split_edited(text: str) -> tuple[str, str]:
+    """A report the user has edited, back into a title and a body.
+
+    The preview is editable, so what is posted is whatever it says rather than
+    what the program would have written. The first non-empty line is the title.
+    """
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip():
+            return line.strip(), "\n".join(lines[index + 1:]).strip()
+    return "", ""
+
+
+def issue_url(report: Report, base: str = NEW_ISSUE_URL,
+              edited: str | None = None) -> tuple[str, bool]:
     """The pre-filled URL, and whether anything had to be left out of it.
 
     A long log tail will not survive a query string, so it is dropped rather
     than producing a URL the browser silently truncates. The caller is expected
     to put the whole report on the clipboard either way.
     """
+    if edited is not None:
+        title, body = split_edited(edited)
+        url = base + "?" + urllib.parse.urlencode({
+            "title": title or report.title, "labels": report.label, "body": body,
+        })
+        if len(url) <= MAX_URL_CHARS:
+            return url, False
+        # Too long once edited: the text is the user's, so nothing is dropped
+        # out of the middle of it. Send the title and let them paste the body.
+        return base + "?" + urllib.parse.urlencode({
+            "title": title or report.title,
+            "labels": report.label,
+            "body": "_(too long for the address bar - paste from the clipboard)_",
+        }), True
+
     for include_log in (True, False):
         body = report.body(include_log=include_log)
         url = base + "?" + urllib.parse.urlencode({

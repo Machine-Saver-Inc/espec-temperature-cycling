@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -59,10 +60,48 @@ def subtitle(text: str) -> QLabel:
     return label
 
 
-def primary(text: str) -> QPushButton:
-    button = QPushButton(text)
-    button.setObjectName("Primary")
-    return button
+def _text_colour(role: str) -> str:
+    """The colour the icon has to match: the button's own text."""
+    if role == "primary":
+        return "#ffffff"
+    application = QApplication.instance()
+    if role == "danger":
+        from espec_burnin.ui.style import BAD
+
+        return BAD
+    if application is None:
+        return "#1a1a1a"
+    return application.palette().color(QPalette.ButtonText).name()
+
+
+def button(text: str, glyph: str = "", role: str = "secondary") -> QPushButton:
+    """A button that looks like one, with its mark on the left.
+
+    Every button in the program comes from here so they cannot drift apart
+    again - the complaint that started this was that some were filled, some
+    were outlined and some were bare words with nothing to press.
+    """
+    made = QPushButton(text)
+    if role == "primary":
+        made.setObjectName("Primary")
+    elif role == "danger":
+        made.setObjectName("Danger")
+    if glyph:
+        from espec_burnin.ui.icons import SIZE, icon
+
+        made.setIcon(icon(glyph, _text_colour(role), SIZE))
+        made.setIconSize(QSize(SIZE, SIZE))
+
+    # Every button in the program is made here, which is the one place a
+    # press can be noted without asking each screen to remember to do it.
+    from espec_burnin.core.trail import TRAIL
+
+    made.clicked.connect(lambda *_, label=text: TRAIL.pressed(label))
+    return made
+
+
+def primary(text: str, glyph: str = "forward") -> QPushButton:
+    return button(text, glyph, "primary")
 
 
 def field_row(label: str, widget: QWidget, hint: str = "",
@@ -123,7 +162,7 @@ class Disclosure(QWidget):
         self.summary = QLabel(summary)
         self.summary.setObjectName("FieldLabel")
         row.addWidget(self.summary)
-        self.opener = QPushButton(opener)
+        self.opener = button(opener, "edit")
         self.opener.setCheckable(True)
         self.opener.setObjectName("Report")
         self.opener.toggled.connect(self._on_toggled)

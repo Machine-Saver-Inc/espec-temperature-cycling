@@ -181,7 +181,17 @@ def main() -> int:
         shoot(setup, "chamber-setup", height=1040)
 
         # Reporting a problem, with the program's state already filled in.
+        # Seeded so the picture shows what a real report carries: the trail
+        # is filled in by using the program, which a screenshot script is not.
+        from espec_burnin.core.trail import TRAIL
         from espec_burnin.ui.report_dialog import ReportDialog
+
+        TRAIL.clear()
+        for step in ("opened Home", "pressed Start a burn-in run",
+                     "opened Connect to the chamber", "pressed Test connection",
+                     "opened Choose the test", "pressed Continue",
+                     "opened Running a burn-in", "pressed Report a problem"):
+            TRAIL.record(step)
 
         dialog = ReportDialog({
             "Screen open": "Running a burn-in",

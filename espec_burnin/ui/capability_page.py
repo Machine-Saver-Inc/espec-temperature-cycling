@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMessageBox,
-    QPushButton,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
@@ -41,6 +40,7 @@ from espec_burnin.core.profile import format_duration
 from espec_burnin.ui.widgets import (
     TEXT_WIDTH,
     FieldGroup,
+    button,
     check,
     cycle_grid,
     editable_choice,
@@ -220,11 +220,11 @@ class CapabilityPage(QWidget):
         layout.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
-        go = primary("Start the test")
+        go = primary("Start the test", "start")
         go.clicked.connect(self._emit_start)
         buttons.addWidget(go)
         buttons.addStretch(1)
-        back = QPushButton("Back")
+        back = button("Back", "back")
         back.clicked.connect(self.back)
         buttons.addWidget(back)
         layout.addLayout(buttons)
@@ -355,7 +355,7 @@ class CapabilityPage(QWidget):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        self.stop_button = QPushButton("Stop the test")
+        self.stop_button = button("Stop the test", "stop", "danger")
         self.stop_button.setObjectName("Danger")
         buttons.addWidget(self.stop_button)
         layout.addLayout(buttons)
@@ -394,17 +394,17 @@ class CapabilityPage(QWidget):
         layout.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
-        self.save_button = primary("Save this profile")
+        self.save_button = primary("Save this profile", "save")
         self.save_button.clicked.connect(self._save)
         buttons.addWidget(self.save_button)
 
-        self.open_folder = QPushButton("Open the measurement data")
+        self.open_folder = button("Open the measurement data", "folder")
         self.open_folder.clicked.connect(self._open_folder)
         self.open_folder.hide()
         buttons.addWidget(self.open_folder)
 
         buttons.addStretch(1)
-        discard = QPushButton("Discard")
+        discard = button("Discard", "discard")
         discard.clicked.connect(lambda: self.finished.emit(None))
         buttons.addWidget(discard)
         layout.addLayout(buttons)

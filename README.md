@@ -271,8 +271,15 @@ screen was open, how the chamber is connected, the controller settings and
 safety limits, whether a run was going and what it was doing, and the last lines
 of the log.
 
+It also lists **what you did just before** — the screens you opened and the
+buttons you pressed, in order. That is usually the answer to "how do I reproduce
+this", and nobody should have to remember it. Only labels are recorded, never
+anything you typed.
+
 Choose **a bug** or **an improvement** — the two produce different templates and
-land under different labels. You see the whole report before anything is sent,
+land under different labels. The report is editable: what gets posted is exactly
+what the preview says, so you can add a detail or take one out. You see it all
+before anything is sent,
 and it is copied to your clipboard as well, so nothing is lost if the browser
 does not open.
 

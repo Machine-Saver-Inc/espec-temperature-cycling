@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QMessageBox,
-    QPushButton,
     QScrollArea,
     QTabWidget,
     QVBoxLayout,
@@ -24,6 +23,7 @@ from espec_burnin.hardware.f4 import PARITY_CHOICES, ConnectionSettings
 from espec_burnin.ui.widgets import (
     Disclosure,
     FieldGroup,
+    button,
     check,
     choice,
     int_spin,
@@ -83,16 +83,16 @@ class SettingsPage(QWidget):
         layout.addWidget(tabs, 1)
 
         buttons = QHBoxLayout()
-        save = primary("Save")
+        save = primary("Save", "save")
         save.clicked.connect(self._emit_saved)
         buttons.addWidget(save)
 
-        restore = QPushButton("Restore defaults")
+        restore = button("Restore defaults", "refresh")
         restore.clicked.connect(self._restore_defaults)
         buttons.addWidget(restore)
 
         buttons.addStretch(1)
-        back = QPushButton("Back")
+        back = button("Back", "back")
         back.clicked.connect(self.back)
         buttons.addWidget(back)
         layout.addLayout(buttons)
