@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.14.0]
+
+### Added
+- **`tests/test_house_rules.py`** — the checks that used to live only in a
+  checklist somebody had to remember. Each one failed a deliberate break before
+  it was kept, because a guard that cannot fail is decoration:
+  - buttons are built by the shared helper rather than by hand
+  - a styled control that sets a corner radius also sets a border and a
+    background, which is the exact mistake that made every secondary button
+    render as bare text
+  - every button role describes its hover, pressed and disabled appearance
+  - every icon is legible at the size it ships at, in a light and a dark tint
+  - the version has a `CHANGELOG` entry, and `release-notes.md` carries the
+    `<version>` placeholder rather than a number
+  - every issue named in the changelog has a test that names it too
+  - `--version` works from the command line
+- **The release workflow refuses a tag that is not on `main`**, which a timed-out
+  push produced once, and **downloads its own published assets and verifies them
+  against the checksums that went up with them**. Uploading is not the same as
+  being downloadable, and the in-app updater refuses anything that does not
+  match - better to find that in CI than on a bench.
+- `python -m espec_burnin.ui.app --version` now works, so the version is
+  readable without the installed shortcut.
+
+### Fixed
+- The stop icon was still only half the width of its grid and read as a speck
+  beside its label. Found by the new legibility test rather than by eye.
+
 ## [0.13.0]
 
 ### Fixed

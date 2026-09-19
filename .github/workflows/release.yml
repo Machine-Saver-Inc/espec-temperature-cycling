@@ -122,6 +122,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A push that times out can leave the tag pointing at a commit that is
+      # on no branch, and the release then ships code nobody can find. This
+      # used to be a step someone remembered between two pushes.
+      - name: The tag is on main
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on "\
+                 "main. Push main first, confirm it landed, then tag."
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME is on main."
 
       - uses: actions/download-artifact@v4
         with:
@@ -163,3 +180,22 @@ jobs:
             out/*.AppImage
             out/SHA256SUMS
           fail_on_unmatched_files: false
+
+      # Download what was just published, anonymously, and check it against the
+      # checksums that went up with it. Uploading is not the same as being
+      # downloadable, and the in-app updater refuses anything that does not
+      # match - better to find that here than on a bench.
+      - name: Verify the published assets
+        shell: bash
+        run: |
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          mkdir -p verify && cd verify
+          curl -fsSL -o SHA256SUMS "$base/SHA256SUMS"
+          while read -r _ name; do
+            echo "fetching $name"
+            curl -fsSL -o "$name" "$base/$name"
+          done < SHA256SUMS
+          sha256sum -c SHA256SUMS
+          file ./*.exe | grep -q "PE32" \
+            || { echo "::error::the published .exe is not a Windows binary"; exit 1; }
+          echo "every published asset matches its checksum."

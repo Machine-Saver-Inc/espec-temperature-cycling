@@ -24,7 +24,7 @@ GLYPHS = {
     "back":      "M15 5 L8 12 L15 19",
     "forward":   "M9 5 L16 12 L9 19",
     "start":     "M7 4 L20 12 L7 20 Z",
-    "stop":      "M6 6 h12 v12 h-12 Z",
+    "stop":      "M5 5 h14 v14 h-14 Z",
     "save":      "M5 13 l4 4 L19 7",
     "folder":    "M4 18 v-11 h5 l2 2 h9 v9 Z",
     "speed":     "M5.6 18.4 A9 9 0 1 1 18.4 18.4 M12 12 L17 7",
