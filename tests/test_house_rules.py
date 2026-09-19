@@ -20,6 +20,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / "espec_burnin" / "ui"
+sys.path.insert(0, str(ROOT))          # tools/ is not an installed package
 
 
 def sources(folder: Path) -> list[Path]:
@@ -243,4 +244,72 @@ def test_the_release_workflow_refuses_a_tag_that_is_not_on_main():
     branch. That happened once and was caught by hand."""
     assert "merge-base --is-ancestor" in release_workflow(), (
         "nothing stops a release being cut from a commit that is not on main"
+    )
+
+
+# --- what a release page says: issue #8 ------------------------------------
+#
+# The release body was the install instructions, and the program's What's new
+# button shows the release body. Someone already running the program pressed it
+# and was told how to download the program.
+
+
+def versions_in_changelog() -> list[str]:
+    return re.findall(r"^## \[([^\]]+)\]", changelog(), re.M)
+
+
+def test_every_release_says_what_changed_in_plain_words():
+    from tools.release_notes import summary
+
+    missing = [v for v in versions_in_changelog() if not summary(v, changelog())]
+    assert not missing, (
+        f"these versions have no plain-language summary: {missing}. Write a "
+        "sentence or two before the first ### section, for somebody standing "
+        "at a chamber rather than for the repository."
+    )
+
+
+# The tells of a summary written for the repo rather than for the person using
+# the program. Not a style opinion: these appeared in a release page a user
+# read and called nonsense.
+JARGON = (
+    ".py", "tests/", "pytest", "ruff", " CI ", "workflow", "commit",
+    "stylesheet", "urlopen", "refactor", "regression test",
+)
+
+
+def test_the_summaries_avoid_developer_jargon():
+    from tools.release_notes import summary
+
+    offenders = []
+    for version in versions_in_changelog():
+        # Matched with their spaces intact: stripping " CI " to "ci" finds it
+        # inside "recipe", which is how this test first failed on its own
+        # perfectly readable prose.
+        text = " " + summary(version, changelog()).lower() + " "
+        for tell in JARGON:
+            if tell.lower() in text:
+                offenders.append(f"{version}: {tell.strip()!r}")
+    assert not offenders, (
+        f"these summaries read like repository notes: {offenders}. The release "
+        "page is what a technician sees when they press What's new."
+    )
+
+
+def test_the_release_body_leads_with_the_changes():
+    from espec_burnin import __version__
+    from tools.release_notes import compose
+
+    body = compose(__version__)
+    assert body.startswith(f"## What's new in {__version__}")
+    assert body.index("What's new") < body.index("## Download"), (
+        "the download section comes first, which is what issue #8 was about"
+    )
+    assert "<version>" not in body, "a placeholder survived into the release body"
+    assert __version__ in body
+
+
+def test_the_workflow_builds_the_body_with_the_composer():
+    assert "tools/release_notes.py" in release_workflow(), (
+        "the release workflow still pastes the install template as the body"
     )

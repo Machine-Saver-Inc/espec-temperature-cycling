@@ -166,8 +166,11 @@ jobs:
       # has to be attached to every release.
       # The release page is where people land to download, so it carries the
       # install instructions rather than just a commit list.
+      # What's new first, then how to install it. Someone who pressed What's
+      # new inside the program was handed install instructions for software
+      # they were already running (issue #8).
       - name: Build the release notes
-        run: sed "s/<version>/$VERSION/g" packaging/release-notes.md > out/NOTES.md
+        run: python tools/release_notes.py "$VERSION" > out/NOTES.md
 
       - uses: softprops/action-gh-release@v2
         with:

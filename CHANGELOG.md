@@ -1,6 +1,36 @@
 # Changelog
 
+## [0.15.0]
+
+**What's new now says what changed.** Pressing **What's new** used to show the
+download and install instructions - for the program you were already running.
+It now leads with a short, plain description of what is different in that
+version, and the install steps follow underneath for anyone arriving for the
+first time. Every past release has been given one of those descriptions too.
+
+### Fixed
+- **The release page led with install instructions instead of the changes**
+  (issue #8). The release body was the install template, and the program's
+  *What's new* button shows the release body, so somebody already running the
+  program was handed a page telling them how to download it. The body is now
+  composed from the plain-language summary at the top of this file's entry for
+  that version, followed by the download section, with a link to the full list
+  of changes.
+
+### Added
+- `tools/release_notes.py` composes the body, and three checks keep it honest:
+  every version has a plain-language summary, none of those summaries use
+  words that belong in a repository rather than at a chamber, and the release
+  body leads with the changes rather than the download.
+- Plain-language summaries written for all fourteen releases, so the rule is
+  enforced everywhere rather than from here onwards.
+
 ## [0.14.0]
+
+Nothing changes on screen in this version. The checks that used to be a list
+someone had to remember are now part of the build itself, so a mistake that was
+caught by eye before is caught before it can ship. One real fault turned up
+while doing it: the stop icon was too small to read next to its label.
 
 ### Added
 - **`tests/test_house_rules.py`** — the checks that used to live only in a
@@ -29,6 +59,20 @@
   beside its label. Found by the new legibility test rather than by eye.
 
 ## [0.13.0]
+
+**Updating should work again.** The program could see a new version and then
+fail to download it, because Windows only fetches the certificates it has
+needed before and the download goes to a different address than the check.
+Both now carry the certificates the program ships with, so neither depends on
+what the machine happens to have collected.
+
+**Every button now looks like a button** — a clear outline, and a small picture
+on the left saying what it does. Several of them used to be plain words with
+nothing to press.
+
+**Reporting a problem now includes what you did just before it.** The screens
+you opened and the buttons you pressed, in order, so you no longer have to
+remember. You can edit the whole report before it is sent.
 
 ### Fixed
 - **The update still failed on certificates, and the retry was the reason**
@@ -62,6 +106,12 @@
 
 ## [0.12.0]
 
+The setup screen no longer asks you to type the chamber's current temperature —
+the program reads it when the run starts, so the first cooling ramp begins from
+where the chamber actually is. The four serial settings are shown as one line,
+`19200 8-N-1`, with a **Change** button for the rare chamber whose controller
+has been altered.
+
 ### Removed
 - **The assumed starting temperature is gone.** It asked the operator to type
   the chamber's current temperature so the first cooling ramp had somewhere to
@@ -86,6 +136,13 @@
   resent.
 
 ## [0.11.0]
+
+**The setup screens are easier to read.** Every box now sits under a heading
+that says what that section is for, instead of one long list where a batch
+name, a temperature and a hold time all looked alike. The two ends of a cycle —
+cold and hot — sit side by side so they can be compared, with the rate each
+ramp works out to shown underneath it. Boxes are the width of what they hold,
+so a temperature no longer stretches across the window.
 
 ### Changed
 - **The setup screens are grouped.** Every input now sits under a named
@@ -118,6 +175,16 @@
   to a sliver. It scrolls now.
 
 ## [0.10.0]
+
+**Updating no longer fails after telling you an update exists.** The download
+now uses the same certificates the check does, and a failure is explained in
+plain words instead of a line of code.
+
+**The run report now shows where the chamber slowed down**, five degrees at a
+time, for both cooling and heating — so a chamber that is slow all the way
+through can be told apart from one that is fine until the last few degrees.
+A speed test that simply ran out of time is no longer recorded as the chamber's
+limit.
 
 ### Fixed
 - **The update download failed on certificates even when the check succeeded**
@@ -161,6 +228,11 @@
 
 ## [0.9.0]
 
+**Report a problem** now sits in the bottom-left corner of every screen. It
+fills in a report with everything usually asked for — the version, the screen
+you were on, how the chamber is connected, what a run was doing — and opens
+GitHub with it ready to post. You see all of it before anything is sent.
+
 ### Added
 - **Report a problem**, bottom-left on every screen, with a journal-and-bug
   icon. It gathers the version, the screen that was open, the chamber and port,
@@ -186,6 +258,10 @@
 
 ## [0.8.0]
 
+**A chamber speed test now saves everything as it goes.** Stopping one early —
+or losing power — used to throw away the evidence of the very stall the test
+was run to find. Every reading is written to disk as it happens.
+
 ### Added
 - **The chamber speed test now writes every sample to disk as it happens.** It
   kept them in memory, so stopping a measurement — or losing power — threw away
@@ -201,6 +277,11 @@
 
 
 ## [0.7.0]
+
+**A speed test now belongs to a chamber**, named by its model and serial number
+the way it is named on the floor, with the test's own name underneath. One
+chamber can hold as many tests as you like — loaded, empty, whatever you need —
+and connecting through the same adapter recognises the chamber without typing.
 
 ### Changed
 - **A chamber is now the thing measurements belong to (#1).** The speed test
@@ -223,6 +304,12 @@
 
 
 ## [0.6.0]
+
+**A failed update check no longer says you are up to date.** If the program
+cannot reach GitHub it now says so, and why, instead of reassuring you.
+
+**The speed test can no longer drive past the safety limits.** It was writing
+setpoints straight to the chamber, bypassing the clamp every run obeys.
 
 ### Fixed
 - **A failed update check reported "you are up to date" (#2).** The check
@@ -257,6 +344,10 @@
 
 ## [0.5.0]
 
+The README now shows the program: pictures of every screen, woven into a
+step-by-step walkthrough of a real job. The selected serial port also used to
+render as a blank bar, which made it look like nothing was chosen.
+
 ### Added
 - The README now shows the program: screenshots of the home screen, port
   selection, run setup, a run in progress, a failure, the settings and a
@@ -277,6 +368,12 @@
 
 ## [0.4.0]
 
+**Update now actually updates.** It downloads the right file for your computer,
+checks it against the published checksum and installs it — the Windows
+installer runs on its own and the program reopens. Before this, the button only
+opened the release page. The home screen also shows which version is installed,
+for a chamber PC with no internet.
+
 ### Added
 - **Update now actually updates.** It downloads the file for the platform,
   verifies it against the release's `SHA256SUMS`, and installs it: the Windows
@@ -293,6 +390,11 @@
 
 
 ## [0.3.0]
+
+**You can now measure what your chamber actually does.** It drives the chamber
+to each extreme and records how fast it really moved, five degrees at a time,
+and saves it against that chamber. The setup screen then warns you when a
+recipe asks for a ramp your chamber cannot follow.
 
 ### Added
 - **Chamber capability test.** Drives the chamber to each extreme and records
@@ -312,6 +414,13 @@
 
 
 ## [0.2.0]
+
+**Every value is editable.** A Settings screen carries the connection, the run
+behaviour and the safety limits, so a reconfigured controller or an unusual
+chamber no longer needs a new build. A run can be given as a total time rather
+than a cycle count, and cooling and heating ramps are set separately. A port
+held by another program now says so, and on Linux names the program holding
+it.
 
 ### Added
 - Every value is editable. A Settings screen exposes the connection (address,
@@ -334,6 +443,9 @@
 
 
 ## [Unreleased]
+
+The first working version: a Watlow F4 driver that reads and commands negative
+temperatures correctly.
 
 ### Added
 - Watlow F4 driver over Modbus RTU with correct signed handling for negative
