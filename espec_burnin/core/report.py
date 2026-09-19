@@ -10,6 +10,7 @@ import html
 from datetime import datetime
 
 from espec_burnin import __version__
+from espec_burnin.core.pace import both_directions, describe
 from espec_burnin.core.profile import format_duration
 
 _CSS = """
@@ -40,6 +41,11 @@ svg { width:100%; height:auto; display:block; }
 .key { font-size:13px; color:var(--muted); margin-top:8px; }
 .swatch { display:inline-block; width:22px; height:3px; vertical-align:middle; margin-right:6px; }
 .bad { color:var(--bad); }
+.pace { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+@media (max-width:700px) { .pace { grid-template-columns:1fr; } }
+.pace p { margin:0 0 10px; }
+.pace td.n, .pace th.n { text-align:right; font-variant-numeric:tabular-nums; }
+tr.stall td { color:var(--bad); font-weight:600; }
 footer { color:var(--muted); font-size:12px; margin-top:32px; border-top:1px solid var(--line);
   padding-top:12px; }
 """
@@ -105,6 +111,45 @@ def _chart_svg(recorder, width: int = 860, height: int = 300) -> str:
     )
 
 
+def _pace_table(pace) -> str:
+    if not pace.bands:
+        return "<p>Not enough movement in this direction to measure.</p>"
+    stalled = pace.stalled_bands
+    rows = "".join(
+        f'<tr class="stall"><td>{b.label}</td><td class="n">{b.minutes:.1f}</td>'
+        f'<td class="n">{abs(b.c_per_min):.2f}</td></tr>'
+        if b in stalled else
+        f'<tr><td>{b.label}</td><td class="n">{b.minutes:.1f}</td>'
+        f'<td class="n">{abs(b.c_per_min):.2f}</td></tr>'
+        for b in pace.bands
+    )
+    return (
+        '<table><tr><th>Band</th><th class="n">Minutes</th>'
+        f'<th class="n">°C/min</th></tr>{rows}</table>'
+    )
+
+
+def _pace_section(recorder) -> str:
+    """Where the chamber kept up and where it ran out of capacity.
+
+    A run that ends short of its setpoint looks the same in the summary
+    figures whether the chamber is slow throughout or fine until the last few
+    degrees. Those are different faults, and only the bands tell them apart.
+    """
+    cooling, heating = both_directions(
+        recorder.samples, recorder.recipe.cold_c, recorder.recipe.hot_c
+    )
+    return f"""<h2>How the chamber paced itself</h2>
+<div class="pace">
+  <div><h3>Cooling</h3><p>{html.escape(describe(cooling))}</p>{_pace_table(cooling)}</div>
+  <div><h3>Heating</h3><p>{html.escape(describe(heating))}</p>{_pace_table(heating)}</div>
+</div>
+<p class="key">Time is counted only while the chamber was travelling that way,
+ so a dwell is not charged to the band it sat in. The slowest band at the end
+ of travel is marked when it is far slower than the rest: that is where the
+ chamber ran out of capacity rather than where it was merely slow.</p>"""
+
+
 def render_report(recorder, *, status: str, elapsed_s: float) -> str:
     r = recorder.recipe
     e = html.escape
@@ -159,6 +204,8 @@ def render_report(recorder, *, status: str, elapsed_s: float) -> str:
   <span class="swatch" style="background:var(--measured)"></span>Measured
   &nbsp;&nbsp;<span class="swatch" style="background:var(--setpoint)"></span>Commanded setpoint
 </div></div>
+
+{_pace_section(recorder)}
 
 <h2>Recipe as run</h2>
 <table>

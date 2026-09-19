@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from espec_burnin import GITHUB_REPO, __version__
+from espec_burnin.update.net import open_url
 
 log = logging.getLogger(__name__)
 
@@ -80,27 +81,9 @@ def asset_pattern_for_this_platform() -> tuple[str, ...]:
     return ()
 
 
-def _open(request, timeout: float):
-    """Open the request, falling back to certifi if the system trust store fails.
-
-    The system store is tried first on purpose: a corporate proxy that
-    intercepts TLS installs its own CA there, and certifi would reject it.
-    certifi is the fallback for a frozen build whose system store is unusable.
-    """
-    try:
-        return urllib.request.urlopen(request, timeout=timeout)
-    except urllib.error.URLError as exc:
-        import ssl
-
-        if not isinstance(exc.reason, ssl.SSLError):
-            raise
-        try:
-            import certifi
-        except ImportError:
-            raise exc from None
-        log.info("system trust store rejected the connection; trying certifi")
-        context = ssl.create_default_context(cafile=certifi.where())
-        return urllib.request.urlopen(request, timeout=timeout, context=context)
+# Kept as a name here because callers and tests already reach for it; the
+# implementation lives in one place so the downloader gets the same handling.
+_open = open_url
 
 
 def fetch_latest_release_detailed(

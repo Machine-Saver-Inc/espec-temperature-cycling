@@ -135,9 +135,23 @@ Everything for one run lands in `Documents/Espec Burn-In/<batch> <date>/`:
 
 | File | What it is |
 | --- | --- |
-| `report.html` | self-contained report — chart, cycles completed, verdict |
+| `report.html` | self-contained report — chart, cycles completed, verdict, and how the chamber paced itself |
 | `run.csv` | every sample: timestamp, cycle, phase, setpoint, measured, comms status |
 | `run.json` | the recipe and live position — what makes a crashed run resumable |
+
+The report also breaks the run into five-degree bands and says how many minutes
+and how many degrees per minute the chamber managed in each, cooling and
+heating, marking the point where it ran out of capacity. Averaged over a whole
+ramp, a chamber that is slow throughout and one that is fine until the last few
+degrees look the same; the bands tell them apart, which is the difference
+between a chamber that needs servicing and a recipe that needs a longer ramp.
+
+`tools/analyse_measurement.py` prints the same breakdown from a `run.csv` at the
+command line, including for a run that was stopped part-way:
+
+```bash
+python tools/analyse_measurement.py "…/Espec Burn-In/<batch> <date>/run.csv"
+```
 
 ---
 
@@ -180,10 +194,17 @@ looking for, so **stopping it early keeps everything taken up to that point.**
 `tools/analyse_measurement.py` turns either file into a band-by-band breakdown
 of where the chamber slowed and where it stopped making progress.
 
-It also records the coldest and hottest actually reached, so a recipe asking for
-−20 °C in a chamber that only manages −17 is flagged before you start. Once a
-profile exists, the recipe screen warns when a ramp is too fast and offers
-**Use the measured times**.
+It also records the coldest and hottest actually reached, and **why the leg
+ended** — whether it got there, stalled, or simply ran out of test time. Those
+are different facts. A chamber reaches colder than a two-hour test had time to
+show; it just takes longer, because every further degree is more work than the
+one before it. Only a stall is treated as a limit.
+
+Once a profile exists, the recipe screen warns when a ramp is too fast for the
+chamber and offers **Use the measured times**. Asked about a temperature further
+out than the test went, it continues the slowdown the test did measure rather
+than assuming the last rate holds — and says the figure is an estimate, and a
+best case.
 
 ---
 

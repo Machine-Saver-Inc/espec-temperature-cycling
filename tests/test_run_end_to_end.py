@@ -265,3 +265,30 @@ def test_no_cap_means_no_limit(results_dir):
     controller.tuning = RunTuning(max_extension_percent=0.0)
     controller._soak_offset_s = recipe.total_seconds * 100
     assert controller._soak_extension_exceeded() is False
+
+
+def test_the_report_says_where_the_chamber_slowed(results_dir):
+    """Issue #3: the report showed the coldest temperature reached and nothing
+    about the shape of getting there, so a chamber that was fine until the last
+    few degrees looked identical to one that was slow throughout."""
+    recipe = Recipe(cycles=2, ramp_down_minutes=30, ramp_up_minutes=30,
+                    cold_dwell_minutes=20, hot_dwell_minutes=20, guaranteed_soak=False)
+    with ChamberSimulator(max_cool_c_per_min=2.5, floor_c=-12.0) as sim:
+        driver, recorder, controller = build(recipe, results_dir, sim, step=30.0)
+        controller.run()
+        driver.close()
+
+    html_text = (recorder.folder / "report.html").read_text(encoding="utf-8")
+    assert "How the chamber paced itself" in html_text
+    assert "Cooling" in html_text and "Heating" in html_text
+    assert "per minute" in html_text
+    assert "C/min" in html_text
+
+    from espec_burnin.core.pace import both_directions
+
+    cooling, heating = both_directions(recorder.samples, recipe.cold_c, recipe.hot_c)
+    assert cooling.bands, "a completed run must produce cooling bands"
+    assert heating.bands, "a completed run must produce heating bands"
+    # Two cycles descend twice; the bands must aggregate both, not stop at the
+    # first minimum in the file.
+    assert sum(b.minutes for b in cooling.bands) > recipe.ramp_down_minutes

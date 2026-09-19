@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.10.0]
+
+### Fixed
+- **The update download failed on certificates even when the check succeeded**
+  (issue #4). The check and the download talk to two different GitHub hosts,
+  and Windows fills its root certificate store on demand, so a machine can
+  verify one host and fail the other. Only the check had a fallback to a bundled
+  certificate list, which is why the program could announce version 0.9.0 and
+  then refuse to fetch it. Both now go through one connection helper: the
+  computer's own certificate store first, so a company proxy still works, then
+  the bundled list. A test fails the build if any part of the update code goes
+  back to opening a connection of its own.
+- A failed download now explains itself in the same plain words the check uses -
+  "the secure connection to GitHub could not be verified, usually a company
+  proxy or an out-of-date certificate store" - with the original error kept
+  underneath so it can be reported. The dialog still offers the release page.
+- The frozen build now explicitly carries the certificate list, so a packaging
+  change cannot quietly remove the fallback.
+
+### Added
+- **The run report now says where the chamber slowed down** (issue #3).
+  Alongside the coldest and hottest temperatures reached, cooling and heating
+  each get a table of five-degree bands with the minutes and degrees per minute
+  the chamber actually managed, and a sentence naming the typical rate, the
+  point where it ran out of capacity and how far short of the setpoint it
+  stopped. Averaged over a whole ramp those two cases look identical; split into
+  bands they are obviously different problems.
+- `tools/analyse_measurement.py` reads a burn-in `run.csv` as well as a speed
+  test, so a run that has already happened - including one that was stopped
+  early - can be looked at without repeating it.
+
+### Changed
+- **A speed test that ran out of time is no longer treated as the chamber's
+  limit.** Each leg now records why it ended - reached, stalled, timed out or
+  cancelled - and only a stall counts as evidence that the chamber cannot go
+  further. A chamber reaches colder than the test had time to show; it simply
+  takes longer, because every further degree is more work than the one before.
+- Times projected beyond the measured range now continue the slowdown the test
+  measured instead of holding the last rate flat, and are labelled as estimates.
+  Held flat, a target far below anything measured looked as quick to reach as
+  one just outside it, and a thirty-minute ramp looked adequate for it.
+
 ## [0.9.0]
 
 ### Added

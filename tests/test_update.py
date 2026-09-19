@@ -316,3 +316,146 @@ def test_the_explanation_always_includes_the_underlying_error():
     """Whoever reads the dialog has to be able to report what it said."""
     text = describe_failure(urllib.error.URLError("something unusual"))
     assert "something unusual" in text
+
+
+# --- issue #4: the check succeeded and the download then failed on TLS ---
+#
+# The checker had a certifi fallback and the downloader did not, so on a
+# machine whose trust store Python cannot use the user was told 0.9.0 was
+# available and then told it could not be fetched. Both now go through one
+# opener; these tests pin that and would fail if a second path came back.
+
+
+def test_every_network_default_in_the_update_code_is_the_shared_opener():
+    """A bare urlopen default is the shape of the bug: it skips the fallback."""
+    import inspect
+
+    from espec_burnin.update import checker, installer
+    from espec_burnin.update.net import open_url
+
+    offenders = []
+    for module in (checker, installer):
+        for name, function in vars(module).items():
+            if not inspect.isfunction(function) or function.__module__ != module.__name__:
+                continue
+            for parameter in inspect.signature(function).parameters.values():
+                if parameter.name != "opener":
+                    continue
+                if parameter.default in (inspect.Parameter.empty, None, open_url):
+                    continue
+                offenders.append(f"{module.__name__}.{name}")
+    assert not offenders, (
+        f"these take an opener that is not the shared one: {offenders}. "
+        "Use espec_burnin.update.net.open_url so the certificate fallback applies."
+    )
+
+
+def ssl_refusing_once(payload: bytes):
+    """Fails the way a machine with an unusable trust store fails: SSLError
+    with no context, success once a CA bundle is supplied."""
+    import ssl
+
+    calls = []
+
+    def _open(request, timeout=None, context=None):
+        calls.append(context)
+        if context is None:
+            raise urllib.error.URLError(ssl.SSLError("CERTIFICATE_VERIFY_FAILED"))
+        return FakeResponse(payload)
+
+    return _open, calls
+
+
+def test_the_download_retries_with_certifi_when_the_system_store_fails(monkeypatch, tmp_path):
+    import urllib.request
+
+    from espec_burnin.update import net
+
+    fake, calls = ssl_refusing_once(PAYLOAD)
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+
+    path = download_asset(make_release(), destination=tmp_path, opener=net.open_url)
+
+    assert path.read_bytes() == PAYLOAD
+    assert len(calls) == 2, "it must try the system store first, then certifi"
+    assert calls[0] is None and calls[1] is not None
+
+
+def test_the_checksum_list_retries_with_certifi_too(monkeypatch):
+    """Verification fetches over the network as well; if only the download
+    fell back, a good download would still be refused as unverified."""
+    import urllib.request
+
+    from espec_burnin.update import net
+    from espec_burnin.update.installer import fetch_checksums
+
+    digest = hashlib.sha256(PAYLOAD).hexdigest()
+    fake, calls = ssl_refusing_once(
+        f"{digest}  EspecBurnIn-Setup-0.9.0.exe\n".encode()
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+
+    text = fetch_checksums(make_release(), opener=net.open_url)
+
+    assert digest in text
+    assert len(calls) == 2
+
+
+def test_a_non_certificate_failure_is_not_retried(monkeypatch, tmp_path):
+    """Only a TLS failure earns the second attempt; a dead network must not
+    be tried twice with a different CA bundle for no reason."""
+    import urllib.request
+
+    from espec_burnin.update import net
+
+    calls = []
+
+    def _open(request, timeout=None, context=None):
+        calls.append(context)
+        raise urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
+
+    with pytest.raises(UpdateError):
+        download_asset(make_release(), destination=tmp_path, opener=net.open_url)
+    assert len(calls) == 1
+
+
+def test_a_certificate_failure_on_download_is_explained_not_just_quoted():
+    """Issue #4 showed the raw urlopen error in the dialog. The user needs to
+    be told what a certificate failure usually means, as the check already does."""
+    import ssl
+    import urllib.request
+
+    def refuse(request, timeout=None, context=None):
+        raise urllib.error.URLError(
+            ssl.SSLCertVerificationError(
+                "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+                "unable to get local issuer certificate (_ssl.c:1010)"
+            )
+        )
+
+    original = urllib.request.urlopen
+    urllib.request.urlopen = refuse
+    try:
+        with pytest.raises(UpdateError) as caught:
+            download_asset(make_release(), destination=None, opener=refuse)
+    finally:
+        urllib.request.urlopen = original
+
+    message = str(caught.value)
+    assert "could not be verified" in message
+    assert "proxy" in message
+    assert "CERTIFICATE_VERIFY_FAILED" in message, "the raw error still has to be there to report"
+
+
+def test_the_frozen_build_is_told_to_include_certifi():
+    """The fallback imports certifi inside a function. A build that dropped it
+    would fail exactly the way issue #4 failed, with no test noticing."""
+    from pathlib import Path
+
+    spec = Path(__file__).resolve().parents[1] / "packaging" / "espec.spec"
+    assert "certifi" in spec.read_text(), (
+        "packaging/espec.spec must name certifi in hiddenimports, or the "
+        "certificate fallback has no CA bundle in the shipped build"
+    )

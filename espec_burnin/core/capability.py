@@ -34,6 +34,11 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 BIN_WIDTH_C = 5.0
+# An extrapolated rate never falls below this, so a projection stays a large
+# number of minutes rather than becoming infinity.
+MIN_EXTRAPOLATED_RATE = 0.02
+# Nor does the roll-off compound faster than this per band.
+ROLLOFF_FLOOR = 0.35
 DEFAULT_PLATEAU_C_PER_MIN = 0.05   # below this, the chamber has stopped moving
 DEFAULT_PLATEAU_MINUTES = 10.0
 DEFAULT_SLOPE_WINDOW_S = 90.0
@@ -76,22 +81,82 @@ class ChamberProfile:
     ambient_c: float | None = None
     aborted: bool = False
 
+    # Why each leg stopped: "reached", "stalled", "timeout" or "stopped".
+    # Without this, a leg that ran out of time looks identical to a chamber
+    # that cannot go any further, and the two call for opposite advice: give
+    # the first one a longer ramp, and give up on the second.
+    cooling_end_reason: str = ""
+    heating_end_reason: str = ""
+
     # -- queries -------------------------------------------------------------
     def _rates(self, direction: Direction) -> dict[float, float]:
         raw = self.cooling_rates if direction is Direction.COOLING else self.heating_rates
         return {float(k): v for k, v in raw.items() if v > 0}
 
-    def rate_at(self, temperature_c: float, direction: Direction) -> float | None:
-        """degC/min the chamber manages near this temperature, or None."""
+    def rolloff_ratio(self, direction: Direction) -> float:
+        """How much harder each further band is than the one before it.
+
+        A chamber does not cool at one rate: every degree closer to its limit
+        costs more than the last. Measured over the coldest bands of a test,
+        that shows up as a roughly constant ratio between one band's rate and
+        the next, which is what lets a test that stopped at -10 °C say
+        something honest about -40 °C.
+
+        1.0 means no roll-off. Values are clamped well away from zero so an
+        extrapolation can never run off to infinite time.
+        """
+        rates = self._rates(direction)
+        if len(rates) < 3:
+            return 1.0
+        ordered = sorted(rates, reverse=direction is Direction.COOLING)
+        ratios = []
+        for near, far in zip(ordered, ordered[1:], strict=False):
+            if rates[near] > 0:
+                ratios.append(rates[far] / rates[near])
+        if not ratios:
+            return 1.0
+        # The last few bands are the ones that describe the approach to the
+        # limit; earlier bands are flat and would wash the roll-off out.
+        tail = ratios[-3:]
+        ratio = statistics.median(tail)
+        return min(1.0, max(ROLLOFF_FLOOR, ratio))
+
+    def rate_at(self, temperature_c: float, direction: Direction,
+                extrapolate: bool = True) -> float | None:
+        """degC/min the chamber manages near this temperature, or None.
+
+        Beyond the bands the test actually covered the rate is carried on at
+        the roll-off the test showed, rather than held flat at the last
+        measured band. Holding it flat is what made a 30-minute ramp look
+        adequate for a target the chamber needs hours to reach.
+        """
         rates = self._rates(direction)
         if not rates:
             return None
         band = bin_for(temperature_c)
         if band in rates:
             return rates[band]
-        # Fall back to the nearest measured band rather than pretending.
+
+        ordered = sorted(rates)
         nearest = min(rates, key=lambda b: abs(b - band))
-        return rates[nearest]
+        beyond = band < ordered[0] if direction is Direction.COOLING else band > ordered[-1]
+        if not (extrapolate and beyond):
+            return rates[nearest]
+
+        ratio = self.rolloff_ratio(direction)
+        steps = int(abs(band - nearest) / BIN_WIDTH_C)
+        return max(rates[nearest] * (ratio ** steps), MIN_EXTRAPOLATED_RATE)
+
+    def is_extrapolated(self, temperature_c: float, direction: Direction) -> bool:
+        """True when a rate for this temperature is an estimate, not a measurement."""
+        rates = self._rates(direction)
+        if not rates:
+            return False
+        band = bin_for(temperature_c)
+        if band in rates:
+            return False
+        ordered = sorted(rates)
+        return band < ordered[0] if direction is Direction.COOLING else band > ordered[-1]
 
     def minutes_to_traverse(self, from_c: float, to_c: float) -> float | None:
         """Integrate the measured rate curve across a span.
@@ -120,6 +185,18 @@ class ChamberProfile:
             edge += BIN_WIDTH_C
         return total
 
+    def traverse_is_estimated(self, from_c: float, to_c: float) -> bool:
+        """True when part of the span was never measured on this chamber."""
+        direction = Direction.COOLING if to_c < from_c else Direction.HEATING
+        low, high = sorted((from_c, to_c))
+        edge = math.floor(low / BIN_WIDTH_C) * BIN_WIDTH_C
+        while edge < high:
+            middle = (max(edge, low) + min(edge + BIN_WIDTH_C, high)) / 2
+            if self.is_extrapolated(middle, direction):
+                return True
+            edge += BIN_WIDTH_C
+        return False
+
     def recommended_minutes(self, from_c: float, to_c: float, margin: float = 1.15) -> int | None:
         """Traversal time with headroom, rounded up to whole minutes."""
         measured = self.minutes_to_traverse(from_c, to_c)
@@ -128,11 +205,33 @@ class ChamberProfile:
         return int(math.ceil(measured * margin))
 
     def can_reach(self, temperature_c: float) -> bool:
-        if self.reachable_min_c is not None and temperature_c < self.reachable_min_c - 0.5:
+        """Whether the chamber is known to be unable to get here.
+
+        Only a leg that stalled - no measurable progress for minutes - is
+        evidence of a limit. A leg that ran out of time stopped because the
+        test stopped, not because the chamber did, and treating the two the
+        same told people a chamber could not reach a temperature it reaches
+        perfectly well given longer.
+        """
+        if (
+            self.reachable_min_c is not None
+            and temperature_c < self.reachable_min_c - 0.5
+            and self.cooling_end_reason == "stalled"
+        ):
             return False
-        if self.reachable_max_c is not None and temperature_c > self.reachable_max_c + 0.5:
+        if (
+            self.reachable_max_c is not None
+            and temperature_c > self.reachable_max_c + 0.5
+            and self.heating_end_reason == "stalled"
+        ):
             return False
         return True
+
+    def beyond_what_was_measured(self, temperature_c: float) -> bool:
+        """Further than the test went, whether or not the chamber can get there."""
+        if self.reachable_min_c is not None and temperature_c < self.reachable_min_c - 0.5:
+            return True
+        return self.reachable_max_c is not None and temperature_c > self.reachable_max_c + 0.5
 
     # -- identity -------------------------------------------------------------
     @property
@@ -419,10 +518,12 @@ class CapabilityTest:
         plateau_since: float | None = None
         extreme: float | None = None
         leg_start = self.clock()
+        reason = "stopped"
 
         while not self._stop.is_set():
             now = self.clock()
             if (now - leg_start) / 60.0 > self.settings.timeout_minutes:
+                reason = "timeout"
                 break
 
             try:
@@ -454,7 +555,8 @@ class CapabilityTest:
                     if plateau_since is None:
                         plateau_since = now
                     elif (now - plateau_since) / 60.0 >= self.settings.plateau_minutes:
-                        break   # the chamber has stopped making progress
+                        reason = "stalled"   # it has stopped making progress
+                        break
 
             if self.log is not None:
                 self.log.record(
@@ -471,6 +573,7 @@ class CapabilityTest:
                        f"— {temperature:.1f} °C, heading for {target_c:.0f} °C",
                        measured=temperature)
             if reached:
+                reason = "reached"
                 break
             self.sleep(self.settings.sample_interval_s)
 
@@ -480,9 +583,11 @@ class CapabilityTest:
         if direction is Direction.COOLING:
             self.profile.cooling_rates = rates
             self.profile.reachable_min_c = extreme
+            self.profile.cooling_end_reason = reason
         else:
             self.profile.heating_rates = rates
             self.profile.reachable_max_c = extreme
+            self.profile.heating_end_reason = reason
 
     def _slope_c_per_min(self, samples: list[tuple[float, float]]) -> float | None:
         """Least-squares slope over the recent window, in degC per minute."""

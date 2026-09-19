@@ -357,3 +357,88 @@ def test_stopping_early_still_leaves_a_usable_file(tmp_path):
     assert len(rows) >= 5, "stopping threw away the samples"
     saved = json.loads((log.folder / "profile.json").read_text(encoding="utf-8"))
     assert saved["aborted"] is True
+
+
+# --- issue #3: a test that ran out of time is not a chamber that ran out ----
+#
+# The BTZ133 in issue #3 stopped at -9.3 C against a -10 C setpoint. That was
+# read as the chamber's floor. It is not: the chamber reaches far colder, it
+# just takes longer, because every further degree is more work than the last.
+# Two things follow - only a stall is evidence of a limit, and a rate must not
+# be carried flat into bands the test never covered.
+
+
+def rolling_off(start: float = 2.6, ratio: float = 0.7, bands: int = 6) -> dict[str, float]:
+    """Cooling rates that get worse the colder it gets, as a real chamber does."""
+    out = {}
+    rate = start
+    for index in range(bands):
+        out[str(25.0 - index * 5.0)] = round(rate, 3)
+        rate *= ratio
+    return out
+
+
+def test_a_leg_that_timed_out_does_not_become_a_chamber_limit():
+    profile = ChamberProfile(
+        cooling_rates=rolling_off(), reachable_min_c=-10.0, cooling_end_reason="timeout"
+    )
+    assert profile.can_reach(-40.0)
+    assert profile.beyond_what_was_measured(-40.0)
+
+
+def test_a_leg_that_stalled_is_a_chamber_limit():
+    profile = ChamberProfile(
+        cooling_rates=rolling_off(), reachable_min_c=-10.0, cooling_end_reason="stalled"
+    )
+    assert not profile.can_reach(-40.0)
+
+
+def test_an_older_profile_with_no_reason_recorded_is_not_treated_as_a_limit():
+    """Profiles saved before the reason existed must not start claiming limits."""
+    profile = ChamberProfile(cooling_rates=rolling_off(), reachable_min_c=-10.0)
+    assert profile.can_reach(-40.0)
+
+
+def test_the_rolloff_is_measured_from_the_coldest_bands():
+    profile = ChamberProfile(cooling_rates=rolling_off(ratio=0.7))
+    assert profile.rolloff_ratio(Direction.COOLING) == pytest.approx(0.7, abs=0.05)
+
+
+def test_a_flat_chamber_has_no_rolloff():
+    flat = {str(25.0 - i * 5.0): 2.0 for i in range(6)}
+    assert ChamberProfile(cooling_rates=flat).rolloff_ratio(Direction.COOLING) == 1.0
+
+
+def test_a_rate_past_the_measured_range_carries_the_rolloff_on():
+    """Held flat, -40 C looked as quick as -10 C and a 30-minute ramp looked fine."""
+    profile = ChamberProfile(cooling_rates=rolling_off(ratio=0.7), reachable_min_c=-10.0)
+    measured_edge = profile.rate_at(-3.0, Direction.COOLING)
+    far = profile.rate_at(-38.0, Direction.COOLING)
+    assert far < measured_edge / 2
+    assert far > 0
+
+
+def test_an_extrapolated_rate_never_reaches_zero():
+    """Otherwise the projected time is infinite and the warning says nothing."""
+    profile = ChamberProfile(cooling_rates=rolling_off(ratio=0.35), reachable_min_c=-10.0)
+    assert profile.rate_at(-200.0, Direction.COOLING) > 0
+
+
+def test_extrapolation_only_applies_beyond_what_was_measured():
+    profile = ChamberProfile(cooling_rates=rolling_off(), reachable_min_c=-10.0)
+    assert not profile.is_extrapolated(0.0, Direction.COOLING)
+    assert profile.is_extrapolated(-40.0, Direction.COOLING)
+
+
+def test_a_span_that_leaves_the_measured_range_is_flagged_as_an_estimate():
+    profile = ChamberProfile(cooling_rates=rolling_off(), reachable_min_c=-10.0)
+    assert not profile.traverse_is_estimated(25.0, 0.0)
+    assert profile.traverse_is_estimated(25.0, -40.0)
+
+
+def test_reaching_further_costs_much_more_than_the_extra_degrees_suggest():
+    """The point of the roll-off: -40 C is not four times the work of -10 C."""
+    profile = ChamberProfile(cooling_rates=rolling_off(), reachable_min_c=-10.0)
+    to_minus_ten = profile.minutes_to_traverse(25.0, -10.0)
+    to_minus_forty = profile.minutes_to_traverse(25.0, -40.0)
+    assert to_minus_forty > to_minus_ten * 4

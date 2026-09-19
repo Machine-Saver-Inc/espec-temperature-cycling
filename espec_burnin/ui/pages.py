@@ -499,27 +499,36 @@ class RecipePage(QWidget):
             return
 
         problems: list[str] = []
+        # "The test stopped here" and "the chamber stops here" are different
+        # facts. A chamber that ran out of test time reaches colder perfectly
+        # well; it simply takes longer, because every further degree is more
+        # work than the one before it. Only a stall is evidence of a limit.
         if not profile.can_reach(recipe.cold_c):
             problems.append(
-                f"the coldest it reached was {profile.reachable_min_c:.1f} \u00b0C, "
-                f"so {recipe.cold_c:g} \u00b0C is below what it managed"
+                f"it stalled at {profile.reachable_min_c:.1f} \u00b0C, "
+                f"so {recipe.cold_c:g} \u00b0C looks out of reach"
             )
         if not profile.can_reach(recipe.hot_c):
             problems.append(
-                f"the hottest it reached was {profile.reachable_max_c:.1f} \u00b0C, "
-                f"so {recipe.hot_c:g} \u00b0C is above what it managed"
+                f"it stalled at {profile.reachable_max_c:.1f} \u00b0C, "
+                f"so {recipe.hot_c:g} \u00b0C looks out of reach"
             )
 
         needs_down = profile.minutes_to_traverse(recipe.hot_c, recipe.cold_c)
         needs_up = profile.minutes_to_traverse(recipe.cold_c, recipe.hot_c)
+        estimated = (
+            profile.traverse_is_estimated(recipe.hot_c, recipe.cold_c)
+            or profile.traverse_is_estimated(recipe.cold_c, recipe.hot_c)
+        )
+        about = "roughly" if estimated else "about"
         if needs_down and recipe.ramp_down_minutes < needs_down:
             problems.append(
-                f"cooling needs about {needs_down:.0f} min, not "
+                f"cooling needs {about} {needs_down:.0f} min, not "
                 f"{recipe.ramp_down_minutes:.0f}"
             )
         if needs_up and recipe.ramp_up_minutes < needs_up:
             problems.append(
-                f"heating needs about {needs_up:.0f} min, not "
+                f"heating needs {about} {needs_up:.0f} min, not "
                 f"{recipe.ramp_up_minutes:.0f}"
             )
 
@@ -534,6 +543,12 @@ class RecipePage(QWidget):
             + "; ".join(problems)
             + ". A ramp the chamber cannot follow becomes a step change, and the "
             "recorded profile stops meaning anything."
+            + (
+                " Part of this range goes further than the test measured, so "
+                "those times are carried on from the slowdown it did show and "
+                "are a best case: expect longer, not shorter."
+                if estimated else ""
+            )
         )
         self.capability_note.show()
         self.use_measured.setVisible(bool(needs_down or needs_up))

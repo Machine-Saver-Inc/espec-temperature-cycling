@@ -26,9 +26,11 @@ from espec_burnin import __version__
 from espec_burnin.update.checker import (
     Release,
     asset_for_this_platform,
+    describe_failure,
     sha256,
     verify_against_checksums,
 )
+from espec_burnin.update.net import open_url
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ def download_asset(
     release: Release,
     destination: Path | None = None,
     progress: Callable[[int, int], None] | None = None,
-    opener: Callable = urllib.request.urlopen,
+    opener: Callable = open_url,
 ) -> Path:
     """Fetch the file for this platform. Raises UpdateError with a readable reason."""
     chosen = asset_for_this_platform(release)
@@ -98,11 +100,17 @@ def download_asset(
                     if progress:
                         progress(done, total)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise UpdateError(f"The download did not finish: {exc}") from exc
+        # The same wording the check uses. A certificate failure here reads as
+        # gibberish on its own, and this is the one the user actually hits:
+        # the check goes to api.github.com and the download to the asset host,
+        # so a trust store that satisfies one can still fail the other.
+        raise UpdateError(
+            f"The download did not finish.\n\n{describe_failure(exc)}"
+        ) from exc
     return target
 
 
-def fetch_checksums(release: Release, opener: Callable = urllib.request.urlopen) -> str:
+def fetch_checksums(release: Release, opener: Callable = open_url) -> str:
     if not release.checksums_url:
         return ""
     request = urllib.request.Request(
@@ -116,7 +124,7 @@ def fetch_checksums(release: Release, opener: Callable = urllib.request.urlopen)
         return ""
 
 
-def verify_download(path: Path, release: Release, opener=urllib.request.urlopen) -> None:
+def verify_download(path: Path, release: Release, opener=open_url) -> None:
     """Refuse to run anything whose hash is not the one the release published."""
     text = fetch_checksums(release, opener)
     if not text:

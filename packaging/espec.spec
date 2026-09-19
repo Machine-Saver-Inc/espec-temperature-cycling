@@ -24,7 +24,10 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=[(str(ROOT / "espec_burnin" / "resources"), "espec_burnin/resources")],
-    hiddenimports=["espec_burnin"],
+    # certifi is imported inside a function so the fallback only costs
+    # anything when it is needed. Name it here so the frozen build
+    # cannot end up without the CA bundle the fallback depends on.
+    hiddenimports=["espec_burnin", "certifi"],
     excludes=EXCLUDES,
     noarchive=False,
 )
