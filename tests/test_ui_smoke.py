@@ -106,3 +106,89 @@ def test_the_report_context_survives_a_broken_field(app, tmp_path):
         except RuntimeError:
             context = None
         assert context is None or isinstance(context, dict)
+
+
+# --- grouping: every input has to say which section it belongs to ----------
+
+
+def group_names(widget) -> list[str]:
+    from PySide6.QtWidgets import QLabel
+
+    return [
+        child.text()
+        for child in widget.findChildren(QLabel)
+        if child.objectName() == "GroupName"
+    ]
+
+
+def test_the_recipe_screen_groups_its_inputs(app):
+    """Nine fields in one flat list gave no clue which value did what."""
+    from espec_burnin.ui.pages import RecipePage
+
+    page = RecipePage(Recipe())
+    names = group_names(page)
+    assert len(names) >= 3, f"the form is still one undifferentiated list: {names}"
+    assert "One cycle" in names
+
+
+def test_the_two_ends_of_the_cycle_are_set_out_side_by_side(app):
+    """Each of the six cycle values is half of a pair; stacked as six rows the
+    pairing was invisible and the asymmetry that matters could not be read."""
+    from PySide6.QtWidgets import QFrame, QGridLayout
+
+    from espec_burnin.ui.pages import RecipePage
+
+    page = RecipePage(Recipe())
+    bezel = next(f for f in page.findChildren(QFrame) if f.objectName() == "Bezel")
+    grid = bezel.layout()
+    assert isinstance(grid, QGridLayout)
+
+    def cell(widget):
+        index = grid.indexOf(widget)
+        assert index >= 0, "not in the cycle grid"
+        return grid.getItemPosition(index)[:2]
+
+    for cold, hot in ((page.cold, page.hot),
+                      (page.ramp_down, page.ramp_up),
+                      (page.cold_dwell, page.hot_dwell)):
+        cold_row, cold_col = cell(cold)
+        hot_row, hot_col = cell(hot)
+        assert cold_row == hot_row, "a pair must share a row"
+        assert cold_col < hot_col, "cold reads left of hot"
+
+
+def test_a_number_box_is_the_width_of_its_number(app):
+    """Stretched across the window a two-digit temperature reads as a text
+    field and puts the stepper arrows a hand's width from the digits."""
+    from espec_burnin.ui.pages import RecipePage
+    from espec_burnin.ui.widgets import NUMBER_WIDTH
+
+    page = RecipePage(Recipe())
+    for box in (page.cold, page.hot, page.ramp_down, page.cold_dwell):
+        assert box.width() == NUMBER_WIDTH
+
+
+def test_the_ramp_rate_is_shown_beside_the_time_that_sets_it(app):
+    from espec_burnin.ui.pages import RecipePage
+
+    page = RecipePage(Recipe(ramp_down_minutes=60, ramp_up_minutes=30,
+                             cold_c=-20, hot_c=80))
+    assert "/min" in page.cool_rate.text()
+    assert page.cool_rate.text() != page.heat_rate.text(), (
+        "a 60-minute cool and a 30-minute heat are not the same rate"
+    )
+
+
+def test_every_settings_tab_is_grouped(app):
+    from PySide6.QtWidgets import QTabWidget
+
+    from espec_burnin.core.run_controller import RunTuning
+    from espec_burnin.ui.settings_page import SettingsPage
+
+    page = SettingsPage(ConnectionSettings(), RunTuning())
+    tabs = page.findChildren(QTabWidget)[0]
+    for index in range(tabs.count()):
+        names = group_names(tabs.widget(index))
+        assert len(names) >= 2, (
+            f"the {tabs.tabText(index)!r} tab is still a flat list: {names}"
+        )

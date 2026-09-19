@@ -39,8 +39,10 @@ from espec_burnin.core.chambers import (
 )
 from espec_burnin.core.profile import format_duration
 from espec_burnin.ui.widgets import (
-    Collapsible,
+    TEXT_WIDTH,
+    FieldGroup,
     check,
+    cycle_grid,
     editable_choice,
     field_row,
     primary,
@@ -120,19 +122,24 @@ class CapabilityPage(QWidget):
 
         form = QWidget()
         f = QVBoxLayout(form)
-        f.setContentsMargins(0, 10, 0, 0)
-        f.setSpacing(10)
+        f.setContentsMargins(0, 12, 0, 0)
+        f.setSpacing(22)
 
         # --- which chamber. This is the identity everything hangs off. -----
-        chamber_box = Collapsible("Chamber", expanded=True)
+        chamber_box = FieldGroup(
+            "Which chamber",
+            "Identified the way the floor identifies it. Everything measured "
+            "here is saved against this model and serial.",
+        )
         self.model = editable_choice(known_models(), placeholder="e.g. Espec BTZ-133")
+        self.model.setMaximumWidth(TEXT_WIDTH)
         self.model.currentTextChanged.connect(self._model_changed)
         chamber_box.add(field_row(
             "Model", self.model,
-            "The chamber this test describes. Pick one you have used before, or "
-            "type a new one."))
+            "Pick one you have used before, or type a new one."))
 
         self.serial = editable_choice([], placeholder="e.g. 0612223")
+        self.serial.setMaximumWidth(TEXT_WIDTH)
         self.serial.currentTextChanged.connect(self._chamber_changed)
         chamber_box.add(field_row("Serial number", self.serial))
 
@@ -143,11 +150,16 @@ class CapabilityPage(QWidget):
         f.addWidget(chamber_box)
 
         # --- which test on that chamber -------------------------------------
-        self.test_box = Collapsible("Test", expanded=True)
+        self.test_box = FieldGroup(
+            "This test",
+            "One chamber can hold several tests - loaded and empty measure "
+            "different things.",
+        )
         self.name = editable_choice([], placeholder="e.g. Loaded \u2014 12 boards")
+        self.name.setMaximumWidth(TEXT_WIDTH)
         self.test_box.add(field_row(
             "Test name", self.name,
-            "Name this setup. Re-using a name replaces that saved test."))
+            "Re-using a name replaces that saved test."))
 
         self.loaded = check("The chamber is loaded as it will be for a real run", True)
         self.test_box.add(field_row("Setup", self.loaded))
@@ -155,13 +167,14 @@ class CapabilityPage(QWidget):
         self.notes = QLineEdit()
         self.notes.setPlaceholderText(
             "e.g. 12 boards on the middle shelf, 2 cables through the left port")
-        self.test_box.add(field_row("What is in it", self.notes))
+        self.test_box.add(field_row("What is in it", self.notes, stretch=True))
 
-        self.previous_label = QLabel("Tests already saved for this chamber")
+        self.previous_label = QLabel("Already saved for this chamber")
         self.previous_label.setObjectName("Hint")
         self.test_box.add(self.previous_label)
 
         self.previous = QListWidget()
+        self.previous.setMinimumHeight(96)
         self.previous.setMaximumHeight(120)
         self.previous.itemSelectionChanged.connect(self._previous_selected)
         self.test_box.add(self.previous)
@@ -174,20 +187,37 @@ class CapabilityPage(QWidget):
         high = self.tuning.absolute_max_c
         self.cold_target = spin(low, low, 20, decimals=0, suffix=" °C")
         self.hot_target = spin(high, 20, high, decimals=0, suffix=" °C")
-        f.addWidget(field_row(
-            "Cool down towards", self.cold_target,
-            f"Aim a little beyond your recipe so the test finds the real limit. "
-            f"Limited to {low:g} °C by the safety limits in Settings."))
-        f.addWidget(field_row(
-            "Heat up towards", self.hot_target,
-            f"Limited to {high:g} °C by the safety limits in Settings."))
-        layout.addWidget(form)
-
-        layout.addWidget(subtitle(
+        targets = FieldGroup(
+            "How far to drive it",
+            "Aim a little beyond the recipe you want to run, so the test finds "
+            "the real limit rather than stopping where you asked.",
+        )
+        holder = QWidget()
+        holder_row = QHBoxLayout(holder)
+        holder_row.setContentsMargins(0, 0, 0, 0)
+        holder_row.addWidget(cycle_grid([("Drive to", self.cold_target, self.hot_target)]))
+        holder_row.addStretch(1)
+        targets.add(holder)
+        targets.add_note(
+            f"Limited to {low:g} °C and {high:g} °C by the safety limits in "
+            f"Settings. Measuring the chamber is still driving the chamber, so it "
+            f"cannot command what a run is forbidden to."
+        )
+        f.addWidget(targets)
+        f.addWidget(subtitle(
             "The test stops each direction when the chamber stops making progress, "
             "so it finds the true limit. Expect it to take a few hours."
         ))
-        layout.addStretch(1)
+        f.addStretch(1)
+
+        # Without this the page squeezes its own controls when the window is
+        # short: the combo boxes lose their descenders and the list of saved
+        # tests collapses to a sliver. A form that will not fit should scroll.
+        scroll = QScrollArea()
+        scroll.setWidget(form)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        layout.addWidget(scroll, 1)
 
         buttons = QHBoxLayout()
         go = primary("Start the test")

@@ -145,7 +145,7 @@ def main() -> int:
         ))
         shoot(run, "port-in-use")
 
-        shoot(SettingsPage(ConnectionSettings(), RunTuning()), "settings", height=760)
+        shoot(SettingsPage(ConnectionSettings(), RunTuning()), "settings", height=880)
 
         # A representative measured profile: fast near ambient, slow at the ends.
         cooling = {str(bin_for(t)): r for t, r in
@@ -178,7 +178,7 @@ def main() -> int:
         setup = CapabilityPage()
         setup.set_chamber(Chamber(model="Espec BTZ-133", serial="0612223",
                                   adapter_serial="AB0KX1QZ"))
-        shoot(setup, "chamber-setup", height=900)
+        shoot(setup, "chamber-setup", height=1040)
 
         # Reporting a problem, with the program's state already filled in.
         from espec_burnin.ui.report_dialog import ReportDialog

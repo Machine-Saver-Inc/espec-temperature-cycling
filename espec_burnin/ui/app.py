@@ -34,12 +34,17 @@ def main() -> int:
 
     from espec_burnin import APP_NAME
     from espec_burnin.ui.main_window import MainWindow
-    from espec_burnin.ui.style import STYLESHEET
+    from espec_burnin.ui.style import build_stylesheet
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("Machine Saver Inc")
-    app.setStyleSheet(STYLESHEET)
+    # The window surface stays whatever the machine is set to; only the two
+    # colours that have to stay legible against it are chosen here.
+    from PySide6.QtGui import QPalette
+
+    dark = app.palette().color(QPalette.Window).lightness() < 128
+    app.setStyleSheet(build_stylesheet(dark))
 
     icon_path = Path(__file__).resolve().parent.parent / "resources" / "icon.png"
     if icon_path.exists():

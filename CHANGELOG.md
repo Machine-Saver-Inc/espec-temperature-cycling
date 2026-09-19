@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.11.0]
+
+### Changed
+- **The setup screens are grouped.** Every input now sits under a named
+  section that says what that section is for, instead of nine fields in one
+  flat list where a board batch, a temperature and a hold time all looked
+  alike. Choose the test is now *This run*, *One cycle*, *Reaching
+  temperature* and *Advanced*; Settings splits into the serial link, the
+  controller and believable readings, then reading the chamber and what ends a
+  run, then setpoint limits and runaway detection. Grouping earns shorter
+  labels - "Write function" inside *The controller* says as much as "Setpoint
+  write function" did on its own.
+- **The two ends of a cycle are set out side by side.** Six of the values on
+  the run screen are cold/hot pairs, and as six separate rows that was
+  invisible. Cold and hot are now columns - go to, taking, hold for - so they
+  can be compared, and the asymmetry that matters (a chamber cools more slowly
+  than it heats) can be read off the page instead of worked out.
+- **The ramp rate is shown under the time that sets it.** It was buried in a
+  sentence above the form; it is the figure the chamber actually has to
+  achieve, so it belongs beside the box that decides it.
+- **Inputs are the width of what they hold.** A two-digit temperature no
+  longer stretches the width of the window, which made it read as a free-text
+  field and put the stepper arrows a hand's width from the digits. Numbers are
+  right-aligned in tabular figures so a column of readings lines up.
+- The cold and hot colours are chosen for the theme in use, so they stay
+  legible on a machine set to dark.
+
+### Fixed
+- The chamber speed setup screen crushed its own controls on a short window -
+  the test-name box lost its descenders and the list of saved tests collapsed
+  to a sliver. It scrolls now.
+
 ## [0.10.0]
 
 ### Fixed

@@ -95,13 +95,21 @@ found again even if it is plugged into a different socket next time.
 Type the board batch name — it names the results folder. Everything else has a
 working default: 12 cycles of 4 hours, −20 °C to +80 °C, which comes to 48 hours.
 
-- **Run length** can be a number of **cycles** or a total time in **hours**. Ask
-  for 72 hours and the program works out the cycles.
-- **Time to cool** and **time to heat** are separate, because chambers rarely
-  cool as fast as they heat — more so with cables through the entry ports.
-- **Guaranteed soak** means a hold does not start counting until the chamber is
-  actually at temperature, so a slow chamber makes the run longer rather than
-  cutting the hold short.
+The screen is in sections, and each says what it is for.
+
+- **This run** is the paperwork: who is running it, what is in the chamber, and
+  how long for. **Length** can be a number of **cycles** or a **total time** —
+  set one and the program works out the other.
+- **One cycle** is the shape the chamber repeats: go to the cold end, hold, go
+  to the hot end, hold. The two ends sit side by side so they can be compared.
+  Under each ramp time is the rate it works out to, which is what the chamber
+  actually has to achieve. Cooling and heating are set separately because
+  chambers rarely cool as fast as they heat — more so with cables through the
+  entry ports.
+- **Reaching temperature** is what counts as having arrived, and what happens
+  when the chamber is late. With **guaranteed soak** on, a hold does not start
+  counting until the chamber is actually at temperature, so a slow chamber makes
+  the run longer rather than cutting the hold short.
 
 The line under the title recalculates as you change things, and tells you when
 the run will finish.

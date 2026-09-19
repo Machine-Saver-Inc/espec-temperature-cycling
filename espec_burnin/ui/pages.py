@@ -30,8 +30,10 @@ from espec_burnin.hardware import ports as ports_mod
 from espec_burnin.hardware.errors import ChamberError
 from espec_burnin.hardware.f4 import ConnectionSettings
 from espec_burnin.ui.widgets import (
+    TEXT_WIDTH,
+    FieldGroup,
     check,
-    field_row,
+    cycle_grid,
     int_spin,
     primary,
     spin,
@@ -356,24 +358,32 @@ class RecipePage(QWidget):
 
         form = QWidget()
         f = QVBoxLayout(form)
-        f.setContentsMargins(0, 8, 0, 0)
-        f.setSpacing(8)
+        f.setContentsMargins(0, 10, 0, 0)
+        f.setSpacing(24)
+
+        # --- who and how long ------------------------------------------------
+        this_run = FieldGroup(
+            "This run",
+            "Named on the report and on the folder the results are written to.",
+        )
 
         self.batch = QLineEdit()
-        self.batch.setPlaceholderText("Board batch name, e.g. MS-4412")
+        self.batch.setPlaceholderText("e.g. MS-4412")
+        self.batch.setMaximumWidth(TEXT_WIDTH)
         self.batch.textChanged.connect(self._update_summary)
-        f.addWidget(field_row("Board batch", self.batch))
+        this_run.add_row("Board batch", self.batch)
 
         self.operator = QLineEdit(operator)
         self.operator.setPlaceholderText("Your name")
-        f.addWidget(field_row("Operator", self.operator))
+        self.operator.setMaximumWidth(TEXT_WIDTH)
+        this_run.add_row("Operator", self.operator)
 
-        # --- how long -------------------------------------------------------
         mode = QWidget()
         mode_row = QHBoxLayout(mode)
         mode_row.setContentsMargins(0, 0, 0, 0)
+        mode_row.setSpacing(8)
         self.by_cycles = QRadioButton("cycles")
-        self.by_hours = QRadioButton("hours")
+        self.by_hours = QRadioButton("total time")
         self.by_cycles.setChecked(True)
         group = QButtonGroup(self)
         group.addButton(self.by_cycles)
@@ -384,63 +394,90 @@ class RecipePage(QWidget):
         self.hours.setEnabled(False)
         mode_row.addWidget(self.by_cycles)
         mode_row.addWidget(self.cycles)
-        mode_row.addSpacing(12)
+        mode_row.addSpacing(24)
         mode_row.addWidget(self.by_hours)
         mode_row.addWidget(self.hours)
         mode_row.addStretch(1)
-        f.addWidget(field_row("Run length", mode,
-                              "Set the number of cycles, or a total time and let "
-                              "the program work out the cycles."))
+        this_run.add_row("Length", mode,
+                         "Set one and the program works out the other.")
+        f.addWidget(this_run)
 
         self.by_cycles.toggled.connect(self._mode_changed)
         self.cycles.valueChanged.connect(self._update_summary)
         self.hours.valueChanged.connect(self._update_summary)
 
-        # --- temperatures ---------------------------------------------------
-        self.cold = spin(recipe.cold_c, -80, 50, decimals=1, suffix=" °C")
-        self.hot = spin(recipe.hot_c, -20, 200, decimals=1, suffix=" °C")
-        f.addWidget(field_row("Cold setpoint", self.cold))
-        f.addWidget(field_row("Hot setpoint", self.hot))
-
+        # --- the cycle --------------------------------------------------------
+        # Each of these six values is one half of a pair. As six rows in a list
+        # that was invisible; side by side, the asymmetry that matters - a
+        # chamber cools more slowly than it heats - can be read off the page.
+        cycle = FieldGroup(
+            "One cycle",
+            "The chamber goes to one end, holds, goes to the other, holds. "
+            "Repeated for the length set above.",
+        )
+        self.cold = spin(recipe.cold_c, -80, 50, decimals=1, suffix=" \u00b0C")
+        self.hot = spin(recipe.hot_c, -20, 200, decimals=1, suffix=" \u00b0C")
         self.ramp_down = spin(recipe.ramp_down_minutes, 1, 1440, decimals=0, suffix=" min")
         self.ramp_up = spin(recipe.ramp_up_minutes, 1, 1440, decimals=0, suffix=" min")
-        f.addWidget(field_row("Time to cool", self.ramp_down,
-                              "Chambers usually cool more slowly than they heat, "
-                              "especially with cable ports open."))
-        f.addWidget(field_row("Time to heat", self.ramp_up))
-
         self.cold_dwell = spin(recipe.cold_dwell_minutes, 1, 1440, decimals=0, suffix=" min")
         self.hot_dwell = spin(recipe.hot_dwell_minutes, 1, 1440, decimals=0, suffix=" min")
-        f.addWidget(field_row("Hold at cold", self.cold_dwell))
-        f.addWidget(field_row("Hold at hot", self.hot_dwell))
 
+        self.cool_rate = QLabel("")
+        self.heat_rate = QLabel("")
+        grid = cycle_grid([
+            ("Go to", self.cold, self.hot),
+            ("Taking", self.ramp_down, self.ramp_up, self.cool_rate, self.heat_rate),
+            ("Hold for", self.cold_dwell, self.hot_dwell),
+        ])
+        holder = QWidget()
+        holder_row = QHBoxLayout(holder)
+        holder_row.setContentsMargins(0, 0, 0, 0)
+        holder_row.addWidget(grid)
+        holder_row.addStretch(1)
+        cycle.add(holder)
+        cycle.add_note("Chambers usually cool more slowly than they heat, "
+                       "especially with cable ports open.")
+        f.addWidget(cycle)
+
+        # --- what counts as being at temperature -------------------------------
+        arrival = FieldGroup(
+            "Reaching temperature",
+            "What the program treats as having arrived, and what it does when "
+            "the chamber is late.",
+        )
+        self.tolerance = spin(recipe.tolerance_c, 0.1, 20, step=0.5, decimals=1,
+                              suffix=" \u00b0C")
+        arrival.add_row("Close enough", self.tolerance,
+                        "Within this of the setpoint counts as being there.")
         self.soak = check(
             "Wait until the chamber actually reaches temperature before counting a hold",
             recipe.guaranteed_soak,
         )
-        f.addWidget(field_row("Guaranteed soak", self.soak,
-                              "On: a slow chamber makes the run longer rather than "
-                              "cutting the hold short."))
+        arrival.add_row("If it is late", self.soak,
+                        "On: a slow chamber makes the run longer rather than "
+                        "cutting the hold short.", stretch=True)
+        f.addWidget(arrival)
 
-        # --- advanced -------------------------------------------------------
+        # --- advanced ---------------------------------------------------------
         self.show_advanced = check("Show advanced values", False)
         f.addWidget(self.show_advanced)
 
-        self.advanced = QWidget()
-        a = QVBoxLayout(self.advanced)
-        a.setContentsMargins(0, 0, 0, 0)
-        a.setSpacing(8)
-        self.tolerance = spin(recipe.tolerance_c, 0.1, 20, step=0.5, decimals=1, suffix=" °C")
-        self.idle = spin(recipe.idle_c, -20, 60, decimals=0, suffix=" °C")
-        self.start_from = spin(recipe.start_from_c, -20, 60, decimals=0, suffix=" °C")
-        a.addWidget(field_row("Hold tolerance", self.tolerance,
-                              "How close counts as being at temperature."))
-        a.addWidget(field_row("Return to when finished", self.idle))
-        a.addWidget(field_row("Assumed starting temperature", self.start_from,
-                              "Where the first cooling ramp starts from."))
+        self.advanced = FieldGroup(
+            "Advanced",
+            "Only the start and the end of the run; the cycles themselves are "
+            "set above.",
+        )
+        self.idle = spin(recipe.idle_c, -20, 60, decimals=0, suffix=" \u00b0C")
+        self.start_from = spin(recipe.start_from_c, -20, 60, decimals=0,
+                               suffix=" \u00b0C")
+        self.advanced.add_row("Starting from", self.start_from,
+                              "Where the first cooling ramp starts.")
+        self.advanced.add_row("Leave it at", self.idle,
+                              "The setpoint the chamber is left on when the run ends.")
         self.advanced.setVisible(False)
         self.show_advanced.toggled.connect(self.advanced.setVisible)
         f.addWidget(self.advanced)
+        f.addStretch(1)
 
         for widget in (self.cold, self.hot, self.ramp_down, self.ramp_up,
                        self.cold_dwell, self.hot_dwell, self.tolerance,
@@ -598,12 +635,15 @@ class RecipePage(QWidget):
 
         self._check_against_profile(recipe)
 
+        # The rates sit under the boxes that set them; the summary says what the
+        # whole run costs, which is the thing that decides whether to start it.
+        self.cool_rate.setText(f"{recipe.cooling_c_per_min:.2f} °C/min")
+        self.heat_rate.setText(f"{recipe.heating_c_per_min:.2f} °C/min")
+
         finish = datetime.now() + timedelta(seconds=recipe.total_seconds)
         self.summary.setText(
             f"{recipe.cycles} cycle{'s' if recipe.cycles != 1 else ''} between "
-            f"{recipe.cold_c:g} °C and {recipe.hot_c:g} °C — cooling at "
-            f"{recipe.cooling_c_per_min:.2f} °C/min, heating at "
-            f"{recipe.heating_c_per_min:.2f} °C/min. "
+            f"{recipe.cold_c:g} °C and {recipe.hot_c:g} °C. "
             f"Total {format_duration(recipe.total_seconds)}, finishing "
             f"{finish.strftime('%A %d %b at %I:%M %p').lstrip('0')}."
         )

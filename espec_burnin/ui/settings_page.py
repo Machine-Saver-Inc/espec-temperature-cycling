@@ -22,9 +22,9 @@ from PySide6.QtWidgets import (
 from espec_burnin.core.run_controller import RunTuning
 from espec_burnin.hardware.f4 import PARITY_CHOICES, ConnectionSettings
 from espec_burnin.ui.widgets import (
+    FieldGroup,
     check,
     choice,
-    field_row,
     int_spin,
     primary,
     spin,
@@ -42,8 +42,8 @@ SANE_CLAMP_MAX = 200.0
 def _page(*rows: QWidget) -> QWidget:
     inner = QWidget()
     layout = QVBoxLayout(inner)
-    layout.setContentsMargins(4, 12, 4, 12)
-    layout.setSpacing(12)
+    layout.setContentsMargins(16, 18, 16, 18)
+    layout.setSpacing(24)
     for row in rows:
         layout.addWidget(row)
     layout.addStretch(1)
@@ -112,27 +112,44 @@ class SettingsPage(QWidget):
         self.plaus_min = spin(c.plausible_min_c, -200, 0, decimals=0, suffix=" °C")
         self.plaus_max = spin(c.plausible_max_c, 0, 1000, decimals=0, suffix=" °C")
 
-        return _page(
-            field_row("Controller address", self.slave,
-                      "The Watlow F4's Modbus address. 201 unless it has been changed."),
-            field_row("Baud rate", self.baud),
-            field_row("Data bits", self.bytesize),
-            field_row("Parity", self.parity),
-            field_row("Stop bits", self.stopbits),
-            field_row("Reply timeout", self.timeout,
-                      "How long to wait for the controller. Too short and a slow "
-                      "reply looks like a dead chamber."),
-            field_row("Retries per message", self.retries),
-            field_row("Setpoint write function", self.write_fc,
-                      "16 is confirmed working on our chamber. Only change this "
-                      "for a different controller that refuses it."),
-            field_row("Port handling", self.close_after,
-                      "Needed on Windows. Can usually be turned off on Linux."),
-            field_row("Lowest believable reading", self.plaus_min,
-                      "A reply outside this range is treated as the wrong device "
-                      "answering, not as a temperature."),
-            field_row("Highest believable reading", self.plaus_max),
+        # Three different things were in one list: how the wire is configured,
+        # how the controller is addressed, and what counts as a believable
+        # answer. They fail differently and are changed for different reasons.
+        link = FieldGroup(
+            "The serial link",
+            "How the port is opened. These must match the chamber's own serial "
+            "settings, which are set on the controller.",
         )
+        link.add_row("Baud rate", self.baud)
+        link.add_row("Data bits", self.bytesize)
+        link.add_row("Parity", self.parity)
+        link.add_row("Stop bits", self.stopbits)
+        link.add_row("Port handling", self.close_after,
+                     "Needed on Windows. Can usually be turned off on Linux.",
+                     stretch=True)
+
+        controller = FieldGroup(
+            "The controller",
+            "How the Watlow F4 is addressed and how patient the program is with it.",
+        )
+        controller.add_row("Address", self.slave,
+                           "The F4's Modbus address. 201 unless it has been changed.")
+        controller.add_row("Reply timeout", self.timeout,
+                           "Too short and a slow reply looks like a dead chamber.")
+        controller.add_row("Retries", self.retries)
+        controller.add_row("Write function", self.write_fc,
+                           "16 is confirmed working on our chamber. Only change "
+                           "this for a different controller that refuses it.")
+
+        believable = FieldGroup(
+            "Believable readings",
+            "A reply outside this range is treated as the wrong device answering, "
+            "not as a temperature.",
+        )
+        believable.add_row("Lowest", self.plaus_min)
+        believable.add_row("Highest", self.plaus_max)
+
+        return _page(link, controller, believable)
 
     def _run_tab(self, t: RunTuning) -> QWidget:
         self.sample = spin(t.sample_interval_s, 0.2, 60.0, step=0.5, decimals=1, suffix=" s")
@@ -140,20 +157,30 @@ class SettingsPage(QWidget):
         self.grace = spin(t.comms_grace_minutes, 1, 240, decimals=0, suffix=" min")
         self.max_extension = spin(t.max_extension_percent, 0, 500, decimals=0, suffix=" %")
 
-        return _page(
-            field_row("Sample interval", self.sample,
-                      "How often the chamber is read and logged."),
-            field_row("Setpoint write threshold", self.epsilon,
-                      "Setpoint changes smaller than this are not sent, to keep "
-                      "the serial link quiet."),
-            field_row("Give up after silence of", self.grace,
-                      "How long the chamber may stay unreachable before the run "
-                      "is marked failed. The run keeps retrying throughout."),
-            field_row("Allow the run to stretch by", self.max_extension,
-                      "Guaranteed soak extends a run when the chamber is behind. "
-                      "Past this much extra, the run is failed rather than "
-                      "stretching for ever. Set to 0 for no limit."),
+        reading = FieldGroup(
+            "Reading the chamber",
+            "How often the program talks to the controller during a run.",
         )
+        reading.add_row("Sample interval", self.sample,
+                        "How often the chamber is read and logged.")
+        reading.add_row("Write threshold", self.epsilon,
+                        "Setpoint changes smaller than this are not sent, to keep "
+                        "the serial link quiet.")
+
+        patience = FieldGroup(
+            "When a run goes wrong",
+            "Both of these end a run. Neither stops the chamber - the chamber's "
+            "own limit controller does that.",
+        )
+        patience.add_row("Give up after", self.grace,
+                         "How long the chamber may stay unreachable before the run "
+                         "is marked failed. The run keeps retrying throughout.")
+        patience.add_row("Allow stretching by", self.max_extension,
+                         "Guaranteed soak extends a run when the chamber is behind. "
+                         "Past this much extra the run is failed rather than "
+                         "stretching for ever. Set to 0 for no limit.")
+
+        return _page(reading, patience)
 
     def _safety_tab(self, t: RunTuning) -> QWidget:
         self.clamp_min = spin(t.absolute_min_c, SANE_CLAMP_MIN, 0, decimals=0, suffix=" °C")
@@ -168,16 +195,23 @@ class SettingsPage(QWidget):
         )
         warning.setObjectName("StatusWarn")
 
-        return _page(
-            warning,
-            field_row("Never command below", self.clamp_min,
-                      "The program refuses to send a setpoint outside these limits, "
-                      "whatever the recipe asks for."),
-            field_row("Never command above", self.clamp_max),
-            field_row("Runaway if off target by", self.runaway_delta,
-                      "During a dwell only. Ramps are expected to lag."),
-            field_row("...for longer than", self.runaway_for),
+        limits = FieldGroup(
+            "Setpoints the program will send",
+            "It refuses to command anything outside this range, whatever the "
+            "recipe asks for.",
         )
+        limits.add_row("Never below", self.clamp_min)
+        limits.add_row("Never above", self.clamp_max)
+
+        runaway = FieldGroup(
+            "Runaway detection",
+            "During a hold only. A ramp is expected to lag behind its setpoint.",
+        )
+        runaway.add_row("Off target by", self.runaway_delta)
+        runaway.add_row("For longer than", self.runaway_for,
+                        "Both have to be true before the run is stopped.")
+
+        return _page(warning, limits, runaway)
 
     # -- actions -------------------------------------------------------------
     def values(self) -> tuple[ConnectionSettings, RunTuning]:
