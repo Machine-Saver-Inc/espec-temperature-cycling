@@ -97,9 +97,10 @@ working default: 12 cycles of 4 hours, −20 °C to +80 °C, which comes to 48 h
 
 The screen is in sections, and each says what it is for.
 
-- **This run** is the paperwork: who is running it, what is in the chamber, and
-  how long for. **Length** can be a number of **cycles** or a **total time** —
-  set one and the program works out the other.
+- **This run** is the paperwork: who is running it, what is in the chamber, how
+  long for, and where the chamber is left afterwards. **Length** can be a number
+  of **cycles** or a **total time** — set one and the program works out the
+  other.
 - **One cycle** is the shape the chamber repeats: go to the cold end, hold, go
   to the hot end, hold. The two ends sit side by side so they can be compared.
   Under each ramp time is the rate it works out to, which is what the chamber
@@ -112,7 +113,9 @@ The screen is in sections, and each says what it is for.
   the run longer rather than cutting the hold short.
 
 The line under the title recalculates as you change things, and tells you when
-the run will finish.
+the run will finish. There is nothing to tell it about the chamber's current
+temperature: it reads that itself when the run starts, and begins the first
+cooling ramp from wherever the chamber actually is.
 
 ### 4. Watch it run
 

@@ -400,6 +400,10 @@ class RecipePage(QWidget):
         mode_row.addStretch(1)
         this_run.add_row("Length", mode,
                          "Set one and the program works out the other.")
+
+        self.idle = spin(recipe.idle_c, -20, 60, decimals=0, suffix=" \u00b0C")
+        this_run.add_row("Leave it at", self.idle,
+                         "The setpoint the chamber is left on when the run ends.")
         f.addWidget(this_run)
 
         self.by_cycles.toggled.connect(self._mode_changed)
@@ -458,30 +462,16 @@ class RecipePage(QWidget):
                         "cutting the hold short.", stretch=True)
         f.addWidget(arrival)
 
-        # --- advanced ---------------------------------------------------------
-        self.show_advanced = check("Show advanced values", False)
-        f.addWidget(self.show_advanced)
-
-        self.advanced = FieldGroup(
-            "Advanced",
-            "Only the start and the end of the run; the cycles themselves are "
-            "set above.",
-        )
-        self.idle = spin(recipe.idle_c, -20, 60, decimals=0, suffix=" \u00b0C")
-        self.start_from = spin(recipe.start_from_c, -20, 60, decimals=0,
-                               suffix=" \u00b0C")
-        self.advanced.add_row("Starting from", self.start_from,
-                              "Where the first cooling ramp starts.")
-        self.advanced.add_row("Leave it at", self.idle,
-                              "The setpoint the chamber is left on when the run ends.")
-        self.advanced.setVisible(False)
-        self.show_advanced.toggled.connect(self.advanced.setVisible)
-        f.addWidget(self.advanced)
         f.addStretch(1)
+
+        # There used to be an Advanced section holding two values. One asked
+        # the operator to guess the chamber's current temperature, which the
+        # program now reads for itself; the other is a single field, and one
+        # field does not earn a disclosure and a heading of its own.
 
         for widget in (self.cold, self.hot, self.ramp_down, self.ramp_up,
                        self.cold_dwell, self.hot_dwell, self.tolerance,
-                       self.idle, self.start_from):
+                       self.idle):
             widget.valueChanged.connect(self._update_summary)
         self.soak.toggled.connect(self._update_summary)
 
@@ -608,7 +598,6 @@ class RecipePage(QWidget):
             tolerance_c=self.tolerance.value(),
             guaranteed_soak=self.soak.isChecked(),
             idle_c=self.idle.value(),
-            start_from_c=self.start_from.value(),
         )
         if self.by_hours.isChecked():
             base = base.with_duration_hours(self.hours.value())

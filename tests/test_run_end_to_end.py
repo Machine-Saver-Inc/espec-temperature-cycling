@@ -292,3 +292,55 @@ def test_the_report_says_where_the_chamber_slowed(results_dir):
     # Two cycles descend twice; the bands must aggregate both, not stop at the
     # first minimum in the file.
     assert sum(b.minutes for b in cooling.bands) > recipe.ramp_down_minutes
+
+
+def test_the_first_ramp_starts_from_the_chamber_not_from_a_guess(results_dir):
+    """The setup screen used to ask for an assumed ambient. The program is
+    connected and reading the chamber before a run starts, so it reads it."""
+    recipe = Recipe(cycles=1, guaranteed_soak=False)
+    assert recipe.start_from_c == 25.0, "the planning default"
+
+    with ChamberSimulator(start_temp_c=41.0) as sim:
+        driver, recorder, controller = build(recipe, results_dir, sim, step=60.0)
+        controller.run()
+        driver.close()
+
+    assert controller.recipe.start_from_c == pytest.approx(41.0, abs=1.0)
+    assert recorder.recipe.start_from_c == pytest.approx(41.0, abs=1.0), (
+        "the report has to show the run that happened, not the one planned"
+    )
+    first = next(s for s in recorder.samples if s.measured_c is not None)
+    assert first.setpoint_c == pytest.approx(41.0, abs=2.0), (
+        "the first commanded setpoint must start where the chamber was"
+    )
+
+
+def test_a_resumed_run_keeps_the_start_it_began_with(results_dir):
+    """Its first ramp is behind it; re-reading now would move a setpoint that
+    has already been commanded."""
+    recipe = Recipe(cycles=2, guaranteed_soak=False)
+    with ChamberSimulator(start_temp_c=70.0) as sim:
+        driver, recorder, controller = build(recipe, results_dir, sim, step=60.0)
+        controller._resume_elapsed = recipe.cycle_seconds
+        controller._observe_starting_temperature()
+        driver.close()
+
+    assert controller.recipe.start_from_c == 25.0
+
+
+def test_an_unreadable_chamber_leaves_the_planned_start_alone(results_dir):
+    """A chamber that will not answer must not leave the first ramp undefined."""
+    from espec_burnin.hardware.errors import NoReplyError
+
+    recipe = Recipe(cycles=1, guaranteed_soak=False)
+    with ChamberSimulator() as sim:
+        driver, recorder, controller = build(recipe, results_dir, sim, step=60.0)
+
+        def refuse():
+            raise NoReplyError(port=sim.port)
+
+        driver.read_temperature = refuse
+        controller._observe_starting_temperature()
+        driver.close()
+
+    assert controller.recipe.start_from_c == 25.0

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from espec_burnin.core.run_controller import RunTuning
 from espec_burnin.hardware.f4 import PARITY_CHOICES, ConnectionSettings
 from espec_burnin.ui.widgets import (
+    Disclosure,
     FieldGroup,
     check,
     choice,
@@ -117,13 +118,20 @@ class SettingsPage(QWidget):
         # answer. They fail differently and are changed for different reasons.
         link = FieldGroup(
             "The serial link",
-            "How the port is opened. These must match the chamber's own serial "
+            "How the port is opened. This must match the chamber's own serial "
             "settings, which are set on the controller.",
         )
-        link.add_row("Baud rate", self.baud)
-        link.add_row("Data bits", self.bytesize)
-        link.add_row("Parity", self.parity)
-        link.add_row("Stop bits", self.stopbits)
+        # Four dropdowns stated one fact. The line says what the link is; the
+        # dropdowns are there for the rare chamber whose controller was changed.
+        self.link_disclosure = Disclosure("", "Change")
+        self.link_disclosure.add_row("Baud rate", self.baud)
+        self.link_disclosure.add_row("Data bits", self.bytesize)
+        self.link_disclosure.add_row("Parity", self.parity)
+        self.link_disclosure.add_row("Stop bits", self.stopbits)
+        for box in (self.baud, self.bytesize, self.parity, self.stopbits):
+            box.currentTextChanged.connect(self._update_link_summary)
+        self._update_link_summary()
+        link.add(self.link_disclosure)
         link.add_row("Port handling", self.close_after,
                      "Needed on Windows. Can usually be turned off on Linux.",
                      stretch=True)
@@ -136,10 +144,21 @@ class SettingsPage(QWidget):
                            "The F4's Modbus address. 201 unless it has been changed.")
         controller.add_row("Reply timeout", self.timeout,
                            "Too short and a slow reply looks like a dead chamber.")
-        controller.add_row("Retries", self.retries)
         controller.add_row("Write function", self.write_fc,
                            "16 is confirmed working on our chamber. Only change "
                            "this for a different controller that refuses it.")
+        # Nobody setting up a chamber has a view on how many times a failed
+        # message should be retried. It stays editable; it stops competing for
+        # attention with the values someone might reasonably change.
+        retries = Disclosure("Retries per message: 3", "Change")
+        retries.add_row("Retries", self.retries,
+                        "How many times a message is resent before the read is "
+                        "counted as failed. The run keeps going either way.")
+        self.retries.valueChanged.connect(
+            lambda value: retries.set_summary(f"Retries per message: {value}")
+        )
+        retries.set_summary(f"Retries per message: {self.retries.value()}")
+        controller.add(retries)
 
         believable = FieldGroup(
             "Believable readings",
@@ -163,9 +182,19 @@ class SettingsPage(QWidget):
         )
         reading.add_row("Sample interval", self.sample,
                         "How often the chamber is read and logged.")
-        reading.add_row("Write threshold", self.epsilon,
-                        "Setpoint changes smaller than this are not sent, to keep "
-                        "the serial link quiet.")
+        threshold = Disclosure("", "Change")
+        threshold.add_row("Write threshold", self.epsilon,
+                          "Setpoint changes smaller than this are not sent, to "
+                          "keep the serial link quiet.")
+        self.epsilon.valueChanged.connect(
+            lambda value: threshold.set_summary(
+                f"Setpoint changes under {value:g} \u00b0C are not sent"
+            )
+        )
+        threshold.set_summary(
+            f"Setpoint changes under {self.epsilon.value():g} \u00b0C are not sent"
+        )
+        reading.add(threshold)
 
         patience = FieldGroup(
             "When a run goes wrong",
@@ -214,6 +243,14 @@ class SettingsPage(QWidget):
         return _page(warning, limits, runaway)
 
     # -- actions -------------------------------------------------------------
+    def _update_link_summary(self) -> None:
+        """19200 8-N-1, the way a serial link is written down everywhere else."""
+        parity = (self.parity.currentText() or "N")[0].upper()
+        self.link_disclosure.set_summary(
+            f"{self.baud.currentText()} "
+            f"{self.bytesize.currentText()}-{parity}-{self.stopbits.currentText()}"
+        )
+
     def values(self) -> tuple[ConnectionSettings, RunTuning]:
         connection = ConnectionSettings(
             slave_address=self.slave.value(),
@@ -276,6 +313,7 @@ class SettingsPage(QWidget):
         self.bytesize.setCurrentText(str(c.bytesize))
         self.parity.setCurrentText(c.parity)
         self.stopbits.setCurrentText(str(c.stopbits))
+        self._update_link_summary()
         self.timeout.setValue(c.timeout_s)
         self.retries.setValue(c.retries)
         self.write_fc.setCurrentText(str(c.write_functioncode))

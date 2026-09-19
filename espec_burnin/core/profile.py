@@ -54,7 +54,13 @@ class Recipe:
     tolerance_c: float = 2.0
     guaranteed_soak: bool = True
     idle_c: float = 25.0         # where the chamber is left when a run ends
-    start_from_c: float = 25.0   # assumed ambient at the first ramp
+    # Where the first cooling ramp begins. This used to be a field on the
+    # setup screen asking the operator to guess ambient; the program is
+    # connected and reading the chamber by the time a run starts, so it
+    # reads the real temperature and replaces this before the first tick.
+    # The default is only what the screen uses to estimate a finish time
+    # before anything has been read.
+    start_from_c: float = 25.0
 
     def __post_init__(self) -> None:
         if self.cycles < 1:

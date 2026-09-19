@@ -101,6 +101,58 @@ def field_row(label: str, widget: QWidget, hint: str = "",
     return holder
 
 
+class Disclosure(QWidget):
+    """A summary of some settings, with the settings themselves behind a link.
+
+    For a group that states one fact in several fields - a serial link is
+    "19200 8-N-1", not four separate decisions. The summary is the answer;
+    the fields are there for the rare machine where it is wrong.
+    """
+
+    def __init__(self, summary: str, opener: str = "Change") -> None:
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
+
+        row = QHBoxLayout()
+        # Indented to the column the values live in: the summary is a value,
+        # not a label, and the column should hold down the page.
+        row.setContentsMargins(LABEL_WIDTH + 12, 0, 0, 0)
+        row.setSpacing(12)
+        self.summary = QLabel(summary)
+        self.summary.setObjectName("FieldLabel")
+        row.addWidget(self.summary)
+        self.opener = QPushButton(opener)
+        self.opener.setCheckable(True)
+        self.opener.setObjectName("Report")
+        self.opener.toggled.connect(self._on_toggled)
+        row.addWidget(self.opener)
+        row.addStretch(1)
+        outer.addLayout(row)
+
+        self.body = QWidget()
+        self.body.setVisible(False)
+        self.content = QVBoxLayout(self.body)
+        self.content.setContentsMargins(0, 0, 0, 0)
+        self.content.setSpacing(10)
+        outer.addWidget(self.body)
+
+    def _on_toggled(self, shown: bool) -> None:
+        self.body.setVisible(shown)
+
+    def add(self, widget: QWidget) -> QWidget:
+        self.content.addWidget(widget)
+        return widget
+
+    def add_row(self, label: str, widget: QWidget, hint: str = "",
+                stretch: bool = False) -> QWidget:
+        return self.add(field_row(label, widget, hint, stretch))
+
+    def set_summary(self, text: str) -> None:
+        self.summary.setText(text)
+
+
 class FieldGroup(QWidget):
     """A named set of fields.
 

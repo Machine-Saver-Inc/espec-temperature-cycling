@@ -128,7 +128,7 @@ def main() -> int:
 
         recipe = RecipePage(Recipe(), "L. Bach")
         recipe.batch.setText("MS-4412")
-        shoot(recipe, "recipe", height=820)
+        shoot(recipe, "recipe", height=860)
 
         run = RunPage()
         run.begin("MS-4412", "COM3", 12)

@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from enum import Enum
 
@@ -126,6 +126,7 @@ class RunController:
 
     def run(self) -> RunState:
         self.state = RunState.RUNNING
+        self._observe_starting_temperature()
         self._started_at = self.clock()
         last_tick = self.clock()
         grace_s = self.tuning.comms_grace_minutes * 60.0
@@ -182,6 +183,28 @@ class RunController:
         return self.state
 
     # -- internals -----------------------------------------------------------
+    def _observe_starting_temperature(self) -> None:
+        """Begin the first ramp wherever the chamber actually is.
+
+        The setup screen used to ask the operator to type an assumed ambient,
+        which is a question the program can answer for itself: it is connected
+        and reading the chamber before the run starts. Reading it makes the
+        first ramp right rather than approximately right, and removes a field
+        that could only ever be a guess.
+
+        A resumed run keeps the recipe it began with - its first ramp is
+        already behind it, and re-reading now would move a setpoint that has
+        already been commanded.
+        """
+        if self._resume_elapsed > 0:
+            return
+        measured, ok = self._read()
+        if not ok or measured is None:
+            return
+        self.recipe = replace(self.recipe, start_from_c=round(measured, 1))
+        self.recorder.recipe = self.recipe
+        log.info("first ramp starts from the measured %.1f C", measured)
+
     def _read(self) -> tuple[float | None, bool]:
         try:
             return self.driver.read_temperature(), True

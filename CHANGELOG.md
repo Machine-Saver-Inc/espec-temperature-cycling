@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.12.0]
+
+### Removed
+- **The assumed starting temperature is gone.** It asked the operator to type
+  the chamber's current temperature so the first cooling ramp had somewhere to
+  start. The program is connected and reading the chamber by the time a run
+  begins, so it now reads the real temperature and starts the first ramp there.
+  That removes a field, and makes the first ramp right rather than
+  approximately right. A resumed run keeps the value it began with, since its
+  first ramp is already behind it.
+- **The Advanced section on the run screen.** With the guess removed it held
+  one value, and one value does not earn a disclosure and a heading of its own.
+  Where the chamber is left when a run ends now sits in *This run*, with the
+  rest of the facts about this particular run.
+
+### Changed
+- **The serial link is one line: `19200 8-N-1`, with Change beside it.** Four
+  dropdowns were stating a single fact. They are still there, and still saved,
+  for the rare chamber whose controller has been reconfigured - they are just
+  not the first thing on the page any more.
+- **Retries per message** and the **setpoint write threshold** read as a
+  sentence with a Change control, for the same reason: nobody setting up a
+  chamber arrives with a view on how many times a failed message should be
+  resent.
+
 ## [0.11.0]
 
 ### Changed

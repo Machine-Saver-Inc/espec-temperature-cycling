@@ -192,3 +192,56 @@ def test_every_settings_tab_is_grouped(app):
         assert len(names) >= 2, (
             f"the {tabs.tabText(index)!r} tab is still a flat list: {names}"
         )
+
+
+# --- complexity that was pulled back out -----------------------------------
+
+
+def test_the_run_screen_no_longer_asks_for_an_assumed_ambient(app):
+    """The program reads the chamber before a run starts, so the field was a
+    question it could answer itself."""
+    from espec_burnin.ui.pages import RecipePage
+
+    page = RecipePage(Recipe())
+    assert not hasattr(page, "start_from")
+    assert not hasattr(page, "show_advanced"), (
+        "one remaining value does not earn a disclosure and a heading"
+    )
+    assert "Advanced" not in group_names(page)
+
+
+def test_the_serial_link_states_itself_in_one_line(app):
+    from espec_burnin.core.run_controller import RunTuning
+    from espec_burnin.ui.settings_page import SettingsPage
+
+    page = SettingsPage(ConnectionSettings(), RunTuning())
+    assert page.link_disclosure.summary.text() == "19200 8-N-1"
+    assert not page.link_disclosure.body.isVisible(), (
+        "four dropdowns for one fact should not be the first thing on the page"
+    )
+
+
+def test_the_serial_summary_follows_the_fields_it_summarises(app):
+    from espec_burnin.core.run_controller import RunTuning
+    from espec_burnin.ui.settings_page import SettingsPage
+
+    page = SettingsPage(ConnectionSettings(), RunTuning())
+    page.baud.setCurrentText("9600")
+    page.parity.setCurrentText("Even")
+    page.stopbits.setCurrentText("2")
+    assert page.link_disclosure.summary.text() == "9600 8-E-2"
+
+
+def test_changing_a_hidden_field_still_reaches_the_saved_settings(app):
+    """Tucking a value away must not disconnect it."""
+    from espec_burnin.core.run_controller import RunTuning
+    from espec_burnin.ui.settings_page import SettingsPage
+
+    page = SettingsPage(ConnectionSettings(), RunTuning())
+    page.baud.setCurrentText("38400")
+    page.retries.setValue(5)
+    page.epsilon.setValue(0.4)
+    connection, tuning = page.values()
+    assert connection.baudrate == 38400
+    assert connection.retries == 5
+    assert tuning.setpoint_epsilon_c == pytest.approx(0.4)
