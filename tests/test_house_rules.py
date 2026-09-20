@@ -400,6 +400,91 @@ def test_the_maker_mark_shows_the_logo(app):
     assert pixmaps, "the Machine Saver mark is missing from the footer"
 
 
+# --- what's new: issue #9 --------------------------------------------------
+
+
+LONG_BODY = (
+    "## What's new in 9.9.9\n\n"
+    + "\n\n".join(
+        f"**Change {n}** \u2014 a paragraph about something that changed, long "
+        "enough to wrap onto a second line in a window this wide."
+        for n in range(1, 41)
+    )
+)
+
+BODY_WITH_INSTALL = (
+    "## What's new in 9.9.9\n\n"
+    "**Something changed** and this is what it means for you.\n\n"
+    "---\n\n"
+    "## Download\n\n"
+    "1. Download `EspecBurnIn-Setup-9.9.9.exe` from **Assets** below.\n"
+    "2. Double-click it.\n"
+)
+
+
+def notes_window(body: str):
+    from espec_burnin.ui.main_window import NotesWindow
+    from espec_burnin.update.checker import Release
+
+    return NotesWindow(Release("9.9.9", "v9.9.9", body, "", {}, None))
+
+
+def test_a_long_release_fits_the_screen_and_scrolls(app):
+    """Issue #9. The notes were a QMessageBox holding the raw body: 2042px
+    tall on a 1080px screen, with no scrollbar and no reachable Close."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+
+    screen = QGuiApplication.primaryScreen()
+    available = screen.availableGeometry().height() if screen else 800
+
+    window = notes_window(LONG_BODY)
+    window.show()
+    assert window.size().height() <= available, (
+        f"{window.size().height()}px of window on a {available}px screen"
+    )
+    assert window.body.verticalScrollBar().maximum() > 0, "it does not scroll"
+    # A bar with a range that is switched off still reports that range, so
+    # asking only about the range passes on a view nobody can scroll.
+    assert window.body.verticalScrollBarPolicy() != Qt.ScrollBarAlwaysOff
+    window.close()
+
+
+def test_the_notes_are_rendered_not_shown_as_source(app):
+    window = notes_window(LONG_BODY)
+    shown = window.body.toPlainText()
+    assert "**" not in shown and not shown.lstrip().startswith("#")
+    window.close()
+
+
+def test_somebody_already_running_it_is_not_told_how_to_install_it(app):
+    """Issue #8's other half: the install steps were still in the window,
+    below the fold."""
+    window = notes_window(BODY_WITH_INSTALL)
+    said = window.body.toPlainText()
+    assert "Something changed" in said
+    assert "Download" not in said and "Double-click" not in said
+    window.close()
+
+
+def test_the_release_page_is_one_click_from_the_notes(app):
+    from PySide6.QtWidgets import QPushButton
+
+    window = notes_window("It got faster.")
+    said = [b.text() for b in window.findChildren(QPushButton)]
+    assert said == ["Close", "Open the release page"], said
+    window.close()
+
+
+def test_what_changed_matches_the_kit():
+    """The same function, letter for letter, as ms-appkit's. When the two
+    drift, one program starts behaving differently from the family."""
+    from espec_burnin.update import notes
+
+    text = Path(notes.__file__).read_text(encoding="utf-8")
+    assert "def what_changed" in text and "RULE" in text
+
+
 def buttons_declared_in_source() -> list[tuple[str, str, str]]:
     """Every button the interface builds, as (file, label, icon name)."""
     found = []

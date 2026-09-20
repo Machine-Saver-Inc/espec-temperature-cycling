@@ -7,7 +7,9 @@ import webbrowser
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QStackedWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -35,7 +38,8 @@ from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_er
 from espec_burnin.ui.report_dialog import ReportDialog
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
-from espec_burnin.ui.widgets import button, maker_mark
+from espec_burnin.ui.widgets import action_bar, button, maker_mark
+from espec_burnin.update.notes import what_changed
 from espec_burnin.update.checker import (
     RELEASES_PAGE,
     CheckOutcome,
@@ -55,6 +59,12 @@ from espec_burnin.update.installer import (
 log = logging.getLogger(__name__)
 
 HOME, CONNECT, RECIPE, RUN, SETTINGS, CAPABILITY = range(6)
+
+# A window taller than this much of the screen has nowhere left to go, and on
+# a laptop it runs off the bottom edge with the buttons on it.
+NOTES_SCREEN_SHARE = 0.6
+NOTES_WIDTH = 660
+NOTES_MIN_HEIGHT = 260
 
 
 class UpdateWorker(QThread):
@@ -100,6 +110,61 @@ class DownloadWorker(QThread):
         self.ready.emit(path)
 
 
+class NotesWindow(QDialog):
+    """What changed in a release, for somebody already running the program.
+
+    Issue #9. This was a `QMessageBox.information` holding the raw release
+    body. A message box sizes itself to its text and does not scroll, so the
+    0.16.0 notes made a window 2042 pixels tall on a 1080-pixel screen with no
+    way to reach the bottom half - including the button that closes it. The
+    Markdown was shown as source, and more than half of what was there was
+    install instructions for a program the reader had already installed.
+
+    So: the changes only, rendered, in a window that scrolls, resizes, and is
+    never taller than the screen it has to fit on.
+    """
+
+    def __init__(self, release: Release, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.release = release
+        self.setWindowTitle(f"What's new in {release.version}")
+        self.setSizeGripEnabled(True)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 14)
+        outer.setSpacing(12)
+
+        self.body = QTextBrowser()
+        self.body.setOpenExternalLinks(True)
+        text = what_changed(release.notes)
+        if text:
+            self.body.setMarkdown(text)
+        else:
+            self.body.setPlainText("No release notes were provided.")
+        outer.addWidget(self.body, 1)
+
+        close = button("Close", "cancel")
+        close.clicked.connect(self.reject)
+        page = button("Open the release page", "open")
+        page.clicked.connect(self._open_page)
+        # No Back here, so the action that leaves takes the left-hand place.
+        outer.addLayout(action_bar(back=close, forward=page))
+
+        self.resize(NOTES_WIDTH, self._height_that_fits())
+
+    def _height_that_fits(self) -> int:
+        """Tall enough for the notes, never taller than the screen allows."""
+        screen = QGuiApplication.primaryScreen()
+        available = screen.availableGeometry().height() if screen else 800
+        ceiling = max(NOTES_MIN_HEIGHT, int(available * NOTES_SCREEN_SHARE))
+        self.body.document().setTextWidth(NOTES_WIDTH - 60)
+        wanted = int(self.body.document().size().height()) + 130
+        return max(NOTES_MIN_HEIGHT, min(wanted, ceiling))
+
+    def _open_page(self) -> None:
+        webbrowser.open(self.release.html_url or RELEASES_PAGE)
+
+
 class UpdateBanner(QFrame):
     update_requested = Signal(object)
 
@@ -134,10 +199,7 @@ class UpdateBanner(QFrame):
 
     def _show_notes(self) -> None:
         if self._release:
-            QMessageBox.information(
-                self, f"What's new in {self._release.version}",
-                self._release.notes or "No release notes were provided.",
-            )
+            NotesWindow(self._release, self).exec()
 
     def _open_release(self) -> None:
         if self._release:

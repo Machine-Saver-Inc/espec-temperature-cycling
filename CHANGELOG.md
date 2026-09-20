@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.17.0]
+
+**What's new now fits on the screen.** Pressing **What's new** opened a window
+that was taller than the screen with no way to scroll it, so anything past the
+halfway point - including the button to close it - could not be reached. It is
+now a normal window: it scrolls, you can resize it, and it never opens taller
+than will fit.
+
+**It shows what changed, and stops there.** Most of what was in that window was
+instructions for downloading and installing the program, which you have already
+done if you are reading it. Those stay on the release page for people who have
+not installed it yet.
+
+**And it reads as text rather than as code.** The notes were being shown the
+way they are written - `**like this**`, with tables drawn in pipe characters -
+instead of formatted.
+
+### Fixed
+- Issue #9. The notes were a `QMessageBox`, which sizes itself to its text and
+  cannot scroll: the 0.16.0 body made a window 2042px tall on a 1080px screen.
+  Replaced with `NotesWindow`, a resizable dialog holding a `QTextBrowser` that
+  renders the Markdown, capped at 60% of the available screen height, with
+  **Close** and **Open the release page**.
+- The window now shows only the part of the release body above the first
+  horizontal rule - the changes - which is the other half of issue #8.
+
+### Added
+- `espec_burnin/update/notes.py`: `what_changed()`, Qt-free, so what the window
+  will show can be asserted without building one. A body with no rule is shown
+  whole; a line of dashes under a Markdown table is not mistaken for the rule.
+- Four guards: a long release fits the screen and scrolls with the bar left on,
+  the notes are rendered rather than shown as source, the install steps are not
+  shown to somebody already running the program, and the release page stays one
+  click away with **Close** on the left.
+
 ## [0.16.0]
 
 **Back is on the left now**, where every other program puts it, and the button
