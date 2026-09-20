@@ -39,7 +39,6 @@ from espec_burnin.ui.report_dialog import ReportDialog
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
 from espec_burnin.ui.widgets import action_bar, button, maker_mark
-from espec_burnin.update.notes import what_changed
 from espec_burnin.update.checker import (
     RELEASES_PAGE,
     CheckOutcome,
@@ -55,6 +54,7 @@ from espec_burnin.update.installer import (
     relaunch,
     verify_download,
 )
+from espec_burnin.update.notes import what_changed
 
 log = logging.getLogger(__name__)
 

@@ -400,6 +400,28 @@ def test_the_maker_mark_shows_the_logo(app):
     assert pixmaps, "the Machine Saver mark is missing from the footer"
 
 
+# --- the lint the build runs -----------------------------------------------
+
+
+def test_the_code_passes_the_lint_the_build_runs():
+    """So `pytest` alone is enough to know a push will not turn CI red.
+
+    The lint lived only in the workflow. An import left in the wrong order
+    sailed through a green local run, went out with a tag on it, and turned
+    all six CI jobs red a minute later.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("ruff") is None:
+        pytest.fail("ruff is not installed, so the lint the build runs was skipped")
+    done = subprocess.run(
+        ["ruff", "check", str(ROOT / "espec_burnin"), str(ROOT / "tests")],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert done.returncode == 0, done.stdout
+
+
 # --- what's new: issue #9 --------------------------------------------------
 
 
