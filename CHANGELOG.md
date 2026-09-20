@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.16.0]
+
+**Back is on the left now**, where every other program puts it, and the button
+that moves you forward is on the right. It was the other way round.
+
+**Every button has a picture on it**, from a proper icon set rather than marks
+drawn by hand, so the same idea looks the same here and in every other Machine
+Saver program.
+
+**The footer is on every screen**: report a problem on the left, who made the
+program in the middle, and the version you are running - with the button to
+check for a newer one - on the right. The version used to be on the first
+screen only.
+
+### Changed
+- Navigation order reversed: `Back` left, the forward action right, on every
+  screen. Built in one `action_bar` helper so six screens cannot disagree, and
+  pinned by a test.
+- Icons now come from **Lucide** (https://lucide.dev), the set shadcn/ui uses,
+  vendored from `lucide-static` v1.47.0 into `resources/icons/` under its ISC
+  licence. The name a button asks for is the file name, so no screen mentions a
+  Lucide name. Hand-drawn glyphs are gone, including the journal-and-bug.
+- The window footer carries the Machine Saver mark with *Created by Machine
+  Saver Inc*, the installed version and last check, and *Check for updates* -
+  on every screen rather than only on Home.
+
+### Added
+- A test that every button asks for a mark the library actually holds. It found
+  one immediately: two buttons asked for `speed`, which is vendored as `gauge`,
+  so they had been rendering nothing at all.
+- A test that the same label always carries the same mark, so the vocabulary
+  stays a vocabulary.
+
 ## [0.15.0]
 
 **What's new now says what changed.** Pressing **What's new** used to show the

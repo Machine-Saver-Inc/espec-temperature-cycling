@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
+
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QFont, QPalette
+from PySide6.QtGui import QFont, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -102,6 +105,52 @@ def button(text: str, glyph: str = "", role: str = "secondary") -> QPushButton:
 
 def primary(text: str, glyph: str = "forward") -> QPushButton:
     return button(text, glyph, "primary")
+
+
+def maker_mark() -> QWidget:
+    """Who made this, in the footer of every Machine Saver program."""
+    holder = QWidget()
+    row = QHBoxLayout(holder)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(7)
+
+    logo = QLabel()
+    path = Path(__file__).resolve().parent.parent / "resources" / "machine-saver.png"
+    if path.is_file():
+        pixmap = QPixmap(str(path)).scaledToHeight(
+            24, Qt.SmoothTransformation
+        )
+        logo.setPixmap(pixmap)
+    row.addWidget(logo)
+
+    text = QLabel("Created by Machine Saver Inc")
+    text.setObjectName("Hint")
+    row.addWidget(text)
+    return holder
+
+
+def action_bar(back: QPushButton | None = None,
+               forward: QPushButton | None = None,
+               extras: Sequence[QPushButton] = ()) -> QHBoxLayout:
+    """The row of actions at the foot of a screen, in one fixed order.
+
+    **Back on the left, the action that moves forward on the right.** That is
+    what every other application on the machine does, and it was the other way
+    round here until somebody said so. Built in one place because six screens
+    each arranging their own row is six chances to disagree.
+
+        [Back]                        [secondary] [secondary] [Forward]
+    """
+    row = QHBoxLayout()
+    row.setSpacing(10)
+    if back is not None:
+        row.addWidget(back)
+    row.addStretch(1)
+    for extra in extras:
+        row.addWidget(extra)
+    if forward is not None:
+        row.addWidget(forward)
+    return row
 
 
 def field_row(label: str, widget: QWidget, hint: str = "",

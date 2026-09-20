@@ -52,7 +52,7 @@ def test_every_page_builds(app):
 
 
 def test_the_report_dialog_builds_and_previews(app):
-    from espec_burnin.ui.report_dialog import ReportDialog, report_icon
+    from espec_burnin.ui.report_dialog import ReportDialog
 
     dialog = ReportDialog({"Screen open": "Home", "Port": "COM3"})
     dialog.summary.setText("Something went wrong")
@@ -66,7 +66,9 @@ def test_the_report_dialog_builds_and_previews(app):
     app.processEvents()
     assert "[Improvement]" in dialog.preview.toPlainText()
 
-    assert not report_icon().isNull(), "the journal-and-bug icon did not render"
+    from espec_burnin.ui.icons import icon
+
+    assert not icon("report").isNull(), "the report mark did not render"
 
 
 def test_the_report_button_sits_on_the_window(app, tmp_path, monkeypatch):

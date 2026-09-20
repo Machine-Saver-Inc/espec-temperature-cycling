@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 import webbrowser
-from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -30,30 +29,6 @@ from espec_burnin.core.trail import TRAIL
 from espec_burnin.ui.widgets import button
 
 log = logging.getLogger(__name__)
-
-ICON_PATH = Path(__file__).resolve().parent.parent / "resources" / "report-icon.svg"
-
-
-def report_icon(colour: str = "#1a1a1a", size: int = 20) -> QIcon:
-    """The journal-and-bug mark, drawn in a colour that suits the palette."""
-    try:
-        from PySide6.QtSvg import QSvgRenderer
-
-        raw = ICON_PATH.read_text(encoding="utf-8").replace("currentColor", colour)
-        renderer = QSvgRenderer(QByteArray(raw.encode("utf-8")))
-        image = QImage(size, size, QImage.Format_ARGB32)
-        image.fill(Qt.transparent)
-        painter = QPainter(image)
-        painter.setRenderHint(QPainter.Antialiasing)
-        renderer.render(painter)
-        painter.end()
-        # QIcon takes a pixmap, not an image: QIcon(QImage) yields a null icon
-        # and no error, which is how a button ships with no icon on it.
-        return QIcon(QPixmap.fromImage(image))
-    except Exception as exc:  # noqa: BLE001 - an icon is never worth failing over
-        log.warning("could not render the report icon: %s", exc)
-        return QIcon()
-
 
 class ReportDialog(QDialog):
     """Pick bug or improvement, describe it, see what will be sent, post it."""

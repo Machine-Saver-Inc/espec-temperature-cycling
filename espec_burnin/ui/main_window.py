@@ -6,7 +6,7 @@ import logging
 import webbrowser
 from datetime import datetime
 
-from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressDialog,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -33,10 +32,10 @@ from espec_burnin.ui import settings as settings_mod
 from espec_burnin.ui.capability_page import CapabilityPage, CapabilityWorker
 from espec_burnin.ui.keepawake import KeepAwake
 from espec_burnin.ui.pages import ConnectPage, HomePage, RecipePage, describe_error
-from espec_burnin.ui.report_dialog import ReportDialog, report_icon
+from espec_burnin.ui.report_dialog import ReportDialog
 from espec_burnin.ui.run_page import RunPage, RunWorker
 from espec_burnin.ui.settings_page import SettingsPage
-from espec_burnin.ui.widgets import button
+from espec_burnin.ui.widgets import button, maker_mark
 from espec_burnin.update.checker import (
     RELEASES_PAGE,
     CheckOutcome,
@@ -173,25 +172,37 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         outer.addWidget(self.stack, 1)
 
-        # Bottom left on every screen: reporting a problem should never mean
-        # hunting for where to report it.
+        # The standing footer, the same on every screen in every Machine Saver
+        # program: report a problem on the left, who made it in the middle, and
+        # which version you are running - with the means to change that - on
+        # the right. None of it ever scrolls away.
         footer = QHBoxLayout()
         footer.setContentsMargins(14, 6, 14, 10)
-        # Its own mark rather than one from the shared set: the journal and
-        # bug is what the user is told to look for in the README.
-        self.report_button = QPushButton("Report a problem")
+        footer.setSpacing(10)
+
+        self.report_button = button("Report a problem", "report")
         self.report_button.setObjectName("Report")
-        self.report_button.setIcon(
-            report_icon(self.palette().buttonText().color().name(), 18)
-        )
-        self.report_button.setIconSize(QSize(18, 18))
         self.report_button.setToolTip(
             "Report a bug or suggest an improvement, with the program's current "
             "state filled in for you"
         )
         self.report_button.clicked.connect(self._report_problem)
         footer.addWidget(self.report_button)
+
         footer.addStretch(1)
+        footer.addWidget(maker_mark())
+        footer.addStretch(1)
+
+        # The version is on screen always, not only on Home: a machine with no
+        # internet is never told about a release, so somebody has to be able to
+        # read this one out over the phone from wherever they happen to be.
+        self.version_label = QLabel("")
+        self.version_label.setObjectName("Hint")
+        footer.addWidget(self.version_label)
+
+        self.check_now = button("Check for updates", "refresh")
+        self.check_now.clicked.connect(self._check_now)
+        footer.addWidget(self.check_now)
         outer.addLayout(footer)
 
         self.setCentralWidget(container)
@@ -201,8 +212,7 @@ class MainWindow(QMainWindow):
         self.home.results_requested.connect(self._open_results_folder)
         self.home.settings_requested.connect(self._open_settings)
         self.home.capability_requested.connect(self._open_capability)
-        self.home.check_now_requested.connect(self._check_now)
-        self.home.set_version_line(
+        self.set_version_line(
             __version__,
             self.settings.get("last_update_check"),
             failed=self.settings.get("last_update_check_failed", False),
@@ -470,11 +480,24 @@ class MainWindow(QMainWindow):
         else:
             self.settings["last_update_check_failed"] = True
         settings_mod.save(self.settings)
-        self.home.set_version_line(
+        self.set_version_line(
             __version__,
             self.settings.get("last_update_check"),
             failed=not ok,
         )
+
+    def set_version_line(self, version: str, last_checked: str | None,
+                         failed: bool = False) -> None:
+        """The footer's version line, on every screen."""
+        if failed:
+            when = " \u00b7 could not reach GitHub to check"
+        elif last_checked:
+            when = f" \u00b7 last checked {last_checked}"
+        else:
+            when = " \u00b7 not checked yet"
+        self.version_label.setText(f"Version {version}{when}")
+        self.version_label.setObjectName("StatusWarn" if failed else "Hint")
+        self.version_label.style().polish(self.version_label)
 
     def _check_now(self) -> None:
         """Manual check, for anyone who wants to ask rather than wait."""

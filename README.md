@@ -265,6 +265,10 @@ screen shows the installed version and when it last managed to check, and
 
 ![Reporting a bug](docs/images/report.png)
 
+Every screen carries the same footer: **Report a problem** on the left, who made
+the program in the middle, and the version you are running with **Check for
+updates** on the right.
+
 **Report a problem** sits in the bottom-left corner of every screen. It fills in
 a GitHub issue for you with what is usually asked for anyway: the version, which
 screen was open, how the chamber is connected, the controller settings and

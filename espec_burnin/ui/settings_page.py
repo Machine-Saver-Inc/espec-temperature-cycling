@@ -10,7 +10,6 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
     QMessageBox,
     QScrollArea,
     QTabWidget,
@@ -23,6 +22,7 @@ from espec_burnin.hardware.f4 import PARITY_CHOICES, ConnectionSettings
 from espec_burnin.ui.widgets import (
     Disclosure,
     FieldGroup,
+    action_bar,
     button,
     check,
     choice,
@@ -82,20 +82,13 @@ class SettingsPage(QWidget):
         tabs.addTab(self._safety_tab(tuning), "Safety limits")
         layout.addWidget(tabs, 1)
 
-        buttons = QHBoxLayout()
         save = primary("Save", "save")
         save.clicked.connect(self._emit_saved)
-        buttons.addWidget(save)
-
-        restore = button("Restore defaults", "refresh")
+        restore = button("Restore defaults", "retry")
         restore.clicked.connect(self._restore_defaults)
-        buttons.addWidget(restore)
-
-        buttons.addStretch(1)
         back = button("Back", "back")
         back.clicked.connect(self.back)
-        buttons.addWidget(back)
-        layout.addLayout(buttons)
+        layout.addLayout(action_bar(back=back, forward=save, extras=[restore]))
 
     # -- tabs ----------------------------------------------------------------
     def _connection_tab(self, c: ConnectionSettings) -> QWidget:

@@ -114,7 +114,7 @@ def main() -> int:
         window.home.set_connection(
             "Chamber connected on COM3 — currently 23.6 °C.", True
         )
-        window.home.set_version_line(__version__, "18 Sep 2026 14:02")
+        window.set_version_line(__version__, "18 Sep 2026 14:02")
         shoot(window, "home")
 
         connect = ConnectPage(ConnectionSettings())

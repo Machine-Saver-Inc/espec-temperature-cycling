@@ -31,6 +31,7 @@ from espec_burnin.hardware.f4 import ConnectionSettings
 from espec_burnin.ui.widgets import (
     TEXT_WIDTH,
     FieldGroup,
+    action_bar,
     button,
     check,
     cycle_grid,
@@ -78,7 +79,6 @@ class HomePage(QWidget):
     results_requested = Signal()
     settings_requested = Signal()
     capability_requested = Signal()
-    check_now_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -100,7 +100,7 @@ class HomePage(QWidget):
         results.clicked.connect(self.results_requested)
         layout.addWidget(results, alignment=Qt.AlignLeft)
 
-        capability = button("Measure the chamber's speed", "speed")
+        capability = button("Measure the chamber's speed", "gauge")
         capability.clicked.connect(self.capability_requested)
         layout.addWidget(capability, alignment=Qt.AlignLeft)
 
@@ -121,32 +121,8 @@ class HomePage(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
-        # The installed version, readable without digging into the title bar --
-        # a chamber PC with no internet will never be told about an update, so
-        # somebody has to be able to read this out over the phone.
-        footer = QHBoxLayout()
-        footer.setContentsMargins(0, 8, 0, 0)
-        self.version_label = QLabel("")
-        self.version_label.setObjectName("Hint")
-        footer.addWidget(self.version_label)
-        footer.addSpacing(10)
-        self.check_now = button("Check for updates", "refresh")
-        self.check_now.clicked.connect(self.check_now_requested)
-        footer.addWidget(self.check_now)
-        footer.addStretch(1)
-        layout.addLayout(footer)
-
-    def set_version_line(self, version: str, last_checked: str | None,
-                         failed: bool = False) -> None:
-        if failed:
-            when = " \u00b7 could not reach GitHub to check"
-        elif last_checked:
-            when = f" \u00b7 last checked {last_checked}"
-        else:
-            when = " \u00b7 not checked yet"
-        self.version_label.setText(f"Version {version}{when}")
-        self.version_label.setObjectName("StatusWarn" if failed else "Hint")
-        self.version_label.style().polish(self.version_label)
+        # The version used to be shown here as well. It now lives in the
+        # window's own footer, on every screen rather than only on this one.
 
     def set_connection(self, text: str, ok: bool) -> None:
         self.status.setText(text)
@@ -190,25 +166,19 @@ class ConnectPage(QWidget):
         self.result.setTextFormat(Qt.RichText)
         layout.addWidget(self.result)
 
-        buttons = QHBoxLayout()
         self.test = primary("Test connection", "connect")
         self.test.clicked.connect(self._test_selected)
         self.test.setEnabled(False)
-        buttons.addWidget(self.test)
-
         self.autodetect = button("Find it for me", "search")
         self.autodetect.clicked.connect(self._autodetect)
-        buttons.addWidget(self.autodetect)
-
         self.refresh_button = button("Check again", "refresh")
         self.refresh_button.clicked.connect(self.refresh)
-        buttons.addWidget(self.refresh_button)
-
-        buttons.addStretch(1)
         back = button("Back", "back")
         back.clicked.connect(self.back)
-        buttons.addWidget(back)
-        layout.addLayout(buttons)
+        layout.addLayout(action_bar(
+            back=back, forward=self.test,
+            extras=[self.refresh_button, self.autodetect],
+        ))
 
         # Plugging the adapter in while this screen is open makes it appear.
         self._timer = QTimer(self)
@@ -357,7 +327,7 @@ class RecipePage(QWidget):
         self.capability_note.hide()
         layout.addWidget(self.capability_note)
 
-        self.use_measured = button("Use the measured times", "speed")
+        self.use_measured = button("Use the measured times", "gauge")
         self.use_measured.clicked.connect(self._apply_measured)
         self.use_measured.hide()
         layout.addWidget(self.use_measured, alignment=Qt.AlignLeft)
@@ -487,15 +457,11 @@ class RecipePage(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
         layout.addWidget(scroll, 1)
 
-        buttons = QHBoxLayout()
         self.go = primary("Continue", "forward")
         self.go.clicked.connect(self._emit_start)
-        buttons.addWidget(self.go)
-        buttons.addStretch(1)
         back = button("Back", "back")
         back.clicked.connect(self.back)
-        buttons.addWidget(back)
-        layout.addLayout(buttons)
+        layout.addLayout(action_bar(back=back, forward=self.go))
 
         self.reload_profiles()
         self._update_summary()

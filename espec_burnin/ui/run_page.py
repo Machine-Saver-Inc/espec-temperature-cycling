@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - plotting is optional at import time
 from espec_burnin.core.profile import format_duration
 from espec_burnin.core.run_controller import RunController, RunState, Status
 from espec_burnin.hardware.errors import ChamberError, NoReplyError
-from espec_burnin.ui.widgets import button
+from espec_burnin.ui.widgets import action_bar, button
 
 
 class RunWorker(QThread):
@@ -99,22 +99,14 @@ class TroubleshootingPanel(QFrame):
         self.port_label.setObjectName("Subtitle")
         layout.addWidget(self.port_label)
 
-        buttons = QHBoxLayout()
-        retry = button("Try again", "refresh")
-        retry.setObjectName("Primary")
-        retry.clicked.connect(self.retry)
-        buttons.addWidget(retry)
-
+        # Stopping is the way out of this screen, so it sits where Back sits.
+        stop = button("Stop the run", "stop", "danger")
+        stop.clicked.connect(self.stop_run)
         change = button("Change port", "connect")
         change.clicked.connect(self.change_port)
-        buttons.addWidget(change)
-
-        buttons.addStretch(1)
-        stop = button("Stop the run", "stop", "danger")
-        stop.setObjectName("Danger")
-        stop.clicked.connect(self.stop_run)
-        buttons.addWidget(stop)
-        layout.addLayout(buttons)
+        retry = button("Try again", "retry", "primary")
+        retry.clicked.connect(self.retry)
+        layout.addLayout(action_bar(back=stop, forward=retry, extras=[change]))
 
         self.show_error(None)
 
@@ -236,13 +228,9 @@ class RunPage(QWidget):
         self.panel.stop_run.connect(self.stop_requested)
         layout.addWidget(self.panel)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
         self.stop = button("Stop run", "stop", "danger")
-        self.stop.setObjectName("Danger")
         self.stop.clicked.connect(self.stop_requested)
-        buttons.addWidget(self.stop)
-        layout.addLayout(buttons)
+        layout.addLayout(action_bar(forward=self.stop))
 
     def begin(self, batch: str, port: str, total_cycles: int) -> None:
         self._elapsed.clear()
